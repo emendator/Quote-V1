@@ -1,13 +1,9 @@
 """商品 CRUD API"""
-import uuid
-import os
-import shutil
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.config import IMAGES_DIR, ALLOWED_IMAGE_EXTENSIONS
 from app.schemas import (
     ProductCreate, ProductUpdate, ProductResponse,
     PaginatedResponse, BatchDeleteRequest, ApiResponse,
@@ -20,11 +16,11 @@ router = APIRouter(prefix="/api/products", tags=["商品管理"])
 @router.get("", response_model=ApiResponse)
 async def list_products(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     keyword: Optional[str] = None,
     category: Optional[str] = None,
     sort_by: str = "id",
-    sort_order: str = "desc",
+    sort_order: str = "asc",
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
     db: AsyncSession = Depends(get_db),
@@ -46,7 +42,7 @@ async def export_products(
     keyword: Optional[str] = None,
     category: Optional[str] = None,
     sort_by: str = "id",
-    sort_order: str = "desc",
+    sort_order: str = "asc",
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
     db: AsyncSession = Depends(get_db),
@@ -67,8 +63,22 @@ async def export_products(
 
 @router.get("/categories", response_model=ApiResponse)
 async def list_categories(db: AsyncSession = Depends(get_db)):
-    """获取所有分类"""
+    """获取所有一级品类"""
     cats = await product_service.get_all_categories(db)
+    return ApiResponse(data=cats)
+
+
+@router.get("/brands", response_model=ApiResponse)
+async def list_brands(db: AsyncSession = Depends(get_db)):
+    """获取所有品牌"""
+    brands = await product_service.get_all_brands(db)
+    return ApiResponse(data=brands)
+
+
+@router.get("/categories/level2", response_model=ApiResponse)
+async def list_category_level2(db: AsyncSession = Depends(get_db)):
+    """获取所有二级品类"""
+    cats = await product_service.get_all_category_level2(db)
     return ApiResponse(data=cats)
 
 
@@ -107,61 +117,8 @@ async def delete_product(product_id: int, db: AsyncSession = Depends(get_db)):
     return ApiResponse(message="删除成功")
 
 
-@router.delete("/batch/delete", response_model=ApiResponse)
+@router.post("/batch/delete", response_model=ApiResponse)
 async def batch_delete(data: BatchDeleteRequest, db: AsyncSession = Depends(get_db)):
     """批量删除商品"""
     count = await product_service.batch_delete_products(db, data.ids)
     return ApiResponse(data={"deleted": count}, message=f"成功删除 {count} 个商品")
-
-
-# ========== 商品图片上传 ==========
-
-@router.post("/{product_id}/image")
-async def upload_product_image(
-    product_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """上传商品图片"""
-    product = await product_service.get_product_by_id(db, product_id)
-    if not product:
-        return ApiResponse(code=404, message="商品不存在")
-
-    # 验证文件类型
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_IMAGE_EXTENSIONS:
-        return ApiResponse(code=400, message=f"不支持的图片格式: {ext}，仅支持 {', '.join(ALLOWED_IMAGE_EXTENSIONS)}")
-
-    # 生成唯一文件名并保存
-    filename = f"{uuid.uuid4()}{ext}"
-    save_path = IMAGES_DIR / filename
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    # 更新数据库中的图片路径（相对 URL）
-    image_url = f"/uploads/images/{filename}"
-    await product_service.update_product(db, product_id, {"product_image": image_url})
-
-    # 重新查询返回完整数据
-    updated = await product_service.get_product_by_id(db, product_id)
-    return ApiResponse(data=ProductResponse.model_validate(updated).model_dump(), message="图片上传成功")
-
-
-@router.delete("/{product_id}/image", response_model=ApiResponse)
-async def delete_product_image(product_id: int, db: AsyncSession = Depends(get_db)):
-    """删除商品图片"""
-    product = await product_service.get_product_by_id(db, product_id)
-    if not product:
-        return ApiResponse(code=404, message="商品不存在")
-
-    if product.product_image:
-        # 尝试删除物理文件
-        filename = product.product_image.replace("/uploads/images/", "")
-        file_path = IMAGES_DIR / filename
-        if file_path.exists():
-            os.remove(file_path)
-
-        # 清空数据库中的图片路径
-        await product_service.update_product(db, product_id, {"product_image": ""})
-
-    return ApiResponse(message="图片已删除")

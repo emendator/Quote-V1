@@ -13,7 +13,7 @@ async def get_products(
     keyword: Optional[str] = None,
     category: Optional[str] = None,
     sort_by: str = "id",
-    sort_order: str = "desc",
+    sort_order: str = "asc",
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
 ) -> Tuple[List[Product], int]:
@@ -21,20 +21,26 @@ async def get_products(
     query = select(Product)
     count_query = select(func.count(Product.id))
 
-    # 关键词搜索（商品型号/品牌/69码）
+    # 关键词搜索（快查型号/商品型号/品牌/产品名称/69码）
     if keyword:
         kw_filter = or_(
+            Product.quick_model.ilike(f"%{keyword}%"),
             Product.product_model.ilike(f"%{keyword}%"),
             Product.brand.ilike(f"%{keyword}%"),
+            Product.product_name.ilike(f"%{keyword}%"),
             Product.barcode_69.ilike(f"%{keyword}%"),
         )
         query = query.where(kw_filter)
         count_query = count_query.where(kw_filter)
 
-    # 分类筛选
+    # 分类筛选（一级品类）
     if category:
-        query = query.where(Product.category == category)
-        count_query = count_query.where(Product.category == category)
+        query = query.where(
+            or_(Product.category_level1 == category, Product.category_level2 == category)
+        )
+        count_query = count_query.where(
+            or_(Product.category_level1 == category, Product.category_level2 == category)
+        )
 
     # 价格区间
     if price_min is not None:
@@ -70,7 +76,7 @@ async def export_products(
     keyword: Optional[str] = None,
     category: Optional[str] = None,
     sort_by: str = "id",
-    sort_order: str = "desc",
+    sort_order: str = "asc",
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
 ) -> bytes:
@@ -121,11 +127,16 @@ async def export_products(
 
     # 表头
     headers = [
-        ("ID", 6), ("品牌", 14), ("商品图片", 30), ("类别", 12),
-        ("商品型号", 18), ("规格", 22), ("京东划线价(元)", 14),
-        ("成本价(元)", 12), ("代发价(元)", 12), ("69码", 16),
-        ("供应商", 16), ("店铺链接", 30), ("折扣率(%)", 10),
-        ("库存", 8), ("备注", 20),
+        ("序号", 6), ("快查型号", 18), ("型号", 18),
+        ("产品名称", 20), ("品牌", 14), ("一级品类", 14),
+        ("二级品类", 14), ("备货商谈价(元)", 14), ("报价更新", 14),
+        ("上次进货价(元)", 14), ("进货价(元)", 12), ("零售价(元)", 12),
+        ("折扣率(%)", 10), ("新活动价(元)", 14), ("链接", 30), ("投标价(元)", 12),
+        ("集采价/项目(元)", 14), ("代发价(元)", 12), ("毛重(kg)", 10),
+        ("箱规", 12), ("合作等级", 12), ("供货状态", 12),
+        ("规格", 20), ("备注", 20), ("代发运费(元)", 14),
+        ("69码", 16), ("销量", 10), ("推荐理由", 20),
+        ("参数", 20), ("3C", 16),
     ]
     for col_idx, (header_text, width) in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=header_text)
@@ -139,21 +150,26 @@ async def export_products(
     price_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
     for row_idx, item in enumerate(items, 2):
         values = [
-            item.id, item.brand, item.product_image, item.category,
-            item.product_model, item.specification, item.jd_price or 0,
-            item.cost_price or 0, item.price, item.barcode_69,
-            item.supplier, item.shop_url, item.discount_rate,
-            item.stock, item.remark,
+            item.id, item.quick_model, item.product_model,
+            item.product_name, item.brand, item.category_level1,
+            item.category_level2, item.negotiation_price or 0, item.price_update,
+            item.last_purchase_price or 0, item.purchase_price or 0, item.retail_price or 0,
+            item.discount_rate, item.new_event_price or 0, item.shop_url, item.bid_price or 0,
+            item.group_purchase_price or 0, item.price, item.gross_weight or 0,
+            item.box_spec, item.cooperation_level, item.supply_status,
+            item.specification, item.remark, item.shipping_fee or 0,
+            item.barcode_69, item.sales_volume, item.recommendation,
+            item.parameters, item.cert_3c,
         ]
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = thin_border
             cell.alignment = Alignment(vertical="center")
             # 代发价列淡黄色背景
-            if col_idx == 9:
+            if col_idx == 18:
                 cell.fill = price_fill
                 cell.number_format = '#,##0.00'
-            elif col_idx in (7, 8, 13):
+            elif col_idx in (8, 10, 11, 12, 14, 16, 17, 19, 25):
                 cell.number_format = '#,##0.00'
         # 冻结首行
         ws.freeze_panes = "A2"
@@ -213,6 +229,18 @@ async def batch_delete_products(db: AsyncSession, ids: List[int]) -> int:
 
 
 async def get_all_categories(db: AsyncSession) -> List[str]:
-    """获取所有分类"""
-    result = await db.execute(select(Product.category).distinct().where(Product.category != ""))
+    """获取所有一级品类"""
+    result = await db.execute(select(Product.category_level1).distinct().where(Product.category_level1 != ""))
+    return [row[0] for row in result.all()]
+
+
+async def get_all_brands(db: AsyncSession) -> List[str]:
+    """获取所有品牌"""
+    result = await db.execute(select(Product.brand).distinct().where(Product.brand != ""))
+    return [row[0] for row in result.all()]
+
+
+async def get_all_category_level2(db: AsyncSession) -> List[str]:
+    """获取所有二级品类"""
+    result = await db.execute(select(Product.category_level2).distinct().where(Product.category_level2 != ""))
     return [row[0] for row in result.all()]

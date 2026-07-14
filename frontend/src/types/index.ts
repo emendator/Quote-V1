@@ -1,20 +1,35 @@
 // 商品数据类型
 export interface Product {
     id: number;
-    brand: string;
-    product_image: string;
-    category: string;
+    quick_model: string;
     product_model: string;
-    specification: string;
-    jd_price: number | null;
-    cost_price: number | null;
-    price: number;
-    barcode_69: string;
-    supplier: string;
-    shop_url: string;
+    product_name: string;
+    brand: string;
+    category_level1: string;
+    category_level2: string;
+    negotiation_price: number | null;
+    price_update: string;
+    last_purchase_price: number | null;
+    purchase_price: number | null;
+    retail_price: number | null;
     discount_rate: number;
-    stock: number;
+    new_event_price: number | null;
+    shop_url: string;
+    bid_price: number | null;
+    group_purchase_price: number | null;
+    price: number;
+    gross_weight: number | null;
+    box_spec: string;
+    cooperation_level: string;
+    supply_status: string;
+    specification: string;
     remark: string;
+    shipping_fee: number | null;
+    barcode_69: string;
+    sales_volume: number;
+    recommendation: string;
+    parameters: string;
+    cert_3c: string;
     created_at: string;
     updated_at: string;
 }
@@ -62,6 +77,7 @@ export interface ParsedQuery {
 
 export interface SmartQueryResult {
     query_intent: string;
+    ai_interpretation?: string;
     parsed_params: Record<string, unknown>;
     parsed_queries: ParsedQuery[];
     results: Product[];

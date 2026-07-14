@@ -19,8 +19,10 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1
 # 上传文件配置
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
-IMAGES_DIR = UPLOAD_DIR / "images"
-IMAGES_DIR.mkdir(exist_ok=True)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
-ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+# DeepSeek API 配置（AI 智能查询）
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "***REMOVED-API-KEY***")
+DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")

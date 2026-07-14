@@ -7,38 +7,68 @@ from pydantic import BaseModel, Field, field_serializer
 # ========== 商品相关 ==========
 
 class ProductCreate(BaseModel):
+    quick_model: str = Field(..., alias="quick_model")
+    product_model: str = Field(..., alias="product_model")
+    product_name: str = ""
     brand: str = ""
-    product_image: str = ""
-    category: str = ""
-    product_model: str = ""
-    specification: str = ""
-    jd_price: Optional[float] = Field(default=0, alias="jd_price")
-    cost_price: Optional[float] = Field(default=0, alias="cost_price")
-    price: float = 0
-    barcode_69: str = Field(default="", alias="barcode_69")
-    supplier: str = ""
+    category_level1: str = ""
+    category_level2: str = ""
+    negotiation_price: Optional[float] = Field(default=0, alias="negotiation_price")
+    price_update: str = ""
+    last_purchase_price: Optional[float] = Field(default=0, alias="last_purchase_price")
+    purchase_price: Optional[float] = Field(default=0, alias="purchase_price")
+    retail_price: Optional[float] = Field(default=0, alias="retail_price")
+    new_event_price: Optional[float] = Field(default=0, alias="new_event_price")
     shop_url: str = ""
-    stock: int = 0
+    bid_price: Optional[float] = Field(default=0, alias="bid_price")
+    group_purchase_price: Optional[float] = Field(default=0, alias="group_purchase_price")
+    price: float = 0
+    gross_weight: Optional[float] = Field(default=0, alias="gross_weight")
+    box_spec: str = ""
+    cooperation_level: str = ""
+    supply_status: str = ""
+    specification: str = ""
     remark: str = ""
+    shipping_fee: Optional[float] = Field(default=0, alias="shipping_fee")
+    barcode_69: str = Field(default="", alias="barcode_69")
+    sales_volume: int = 0
+    recommendation: str = ""
+    parameters: str = ""
+    cert_3c: str = ""
 
     class Config:
         populate_by_name = True
 
 
 class ProductUpdate(BaseModel):
-    brand: Optional[str] = None
-    product_image: Optional[str] = None
-    category: Optional[str] = None
+    quick_model: Optional[str] = None
     product_model: Optional[str] = None
-    specification: Optional[str] = None
-    jd_price: Optional[float] = Field(default=None, alias="jd_price")
-    cost_price: Optional[float] = Field(default=None, alias="cost_price")
-    price: Optional[float] = None
-    barcode_69: Optional[str] = Field(default=None, alias="barcode_69")
-    supplier: Optional[str] = None
+    product_name: Optional[str] = None
+    brand: Optional[str] = None
+    category_level1: Optional[str] = None
+    category_level2: Optional[str] = None
+    negotiation_price: Optional[float] = Field(default=None, alias="negotiation_price")
+    price_update: Optional[str] = None
+    last_purchase_price: Optional[float] = Field(default=None, alias="last_purchase_price")
+    purchase_price: Optional[float] = Field(default=None, alias="purchase_price")
+    retail_price: Optional[float] = Field(default=None, alias="retail_price")
+    new_event_price: Optional[float] = Field(default=None, alias="new_event_price")
     shop_url: Optional[str] = None
-    stock: Optional[int] = None
+    bid_price: Optional[float] = Field(default=None, alias="bid_price")
+    group_purchase_price: Optional[float] = Field(default=None, alias="group_purchase_price")
+    price: Optional[float] = None
+    gross_weight: Optional[float] = Field(default=None, alias="gross_weight")
+    box_spec: Optional[str] = None
+    cooperation_level: Optional[str] = None
+    supply_status: Optional[str] = None
+    specification: Optional[str] = None
     remark: Optional[str] = None
+    shipping_fee: Optional[float] = Field(default=None, alias="shipping_fee")
+    barcode_69: Optional[str] = Field(default=None, alias="barcode_69")
+    sales_volume: Optional[int] = None
+    recommendation: Optional[str] = None
+    parameters: Optional[str] = None
+    cert_3c: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -46,20 +76,35 @@ class ProductUpdate(BaseModel):
 
 class ProductResponse(BaseModel):
     id: int
-    brand: str
-    product_image: str
-    category: str
-    product_model: str
-    specification: str
-    jd_price: Optional[float] = None
-    cost_price: Optional[float] = None
-    price: float
-    barcode_69: str
-    supplier: str
-    shop_url: str
+    quick_model: str = ""
+    product_model: str = ""
+    product_name: Optional[str] = ""
+    brand: Optional[str] = ""
+    category_level1: Optional[str] = ""
+    category_level2: Optional[str] = ""
+    negotiation_price: Optional[float] = None
+    price_update: Optional[str] = ""
+    last_purchase_price: Optional[float] = None
+    purchase_price: Optional[float] = None
+    retail_price: Optional[float] = None
     discount_rate: float = 0.0
-    stock: int
-    remark: str
+    new_event_price: Optional[float] = None
+    shop_url: Optional[str] = ""
+    bid_price: Optional[float] = None
+    group_purchase_price: Optional[float] = None
+    price: float
+    gross_weight: Optional[float] = None
+    box_spec: Optional[str] = ""
+    cooperation_level: Optional[str] = ""
+    supply_status: Optional[str] = ""
+    specification: Optional[str] = ""
+    remark: Optional[str] = ""
+    shipping_fee: Optional[float] = None
+    barcode_69: str
+    sales_volume: Optional[int] = 0
+    recommendation: Optional[str] = ""
+    parameters: Optional[str] = ""
+    cert_3c: Optional[str] = ""
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

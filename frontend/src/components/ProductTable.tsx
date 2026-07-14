@@ -1,4 +1,4 @@
-import { Table, Button, Space, Popconfirm, Tag, Input, Popover } from 'antd';
+import { Table, Button, Space, Popconfirm, Tag, Input } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Product } from '../types';
@@ -10,6 +10,7 @@ interface Props {
     page: number;
     pageSize: number;
     selectedRowKeys: number[];
+    zoom?: number;
     onPageChange: (page: number, pageSize: number) => void;
     onEdit: (record: Product) => void;
     onDelete: (id: number) => void;
@@ -24,6 +25,7 @@ export default function ProductTable({
     page,
     pageSize,
     selectedRowKeys,
+    zoom = 100,
     onPageChange,
     onEdit,
     onDelete,
@@ -31,57 +33,36 @@ export default function ProductTable({
     onSelectChange,
 }: Props) {
     const columns: ColumnsType<Product> = [
-        { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
-        {
-            title: '图片',
-            dataIndex: 'product_image',
-            key: 'product_image',
-            width: 70,
-            render: (v: string) =>
-                v ? (
-                    <Popover content={<img src={v} alt="商品图片" style={{ maxWidth: 300, maxHeight: 300 }} />} trigger="hover">
-                        <img src={v} alt="商品图片" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4, cursor: 'pointer', border: '1px solid #f0f0f0' }} />
-                    </Popover>
-                ) : (
-                    <span style={{ color: '#ccc' }}>无</span>
-                ),
-        },
-        { title: '品牌', dataIndex: 'brand', key: 'brand', width: 100, render: (v) => v || '-' },
-        { title: '类别', dataIndex: 'category', key: 'category', width: 90, render: (v) => v || '-' },
-        { title: '商品型号', dataIndex: 'product_model', key: 'product_model', width: 130, ellipsis: true, render: (v) => v || '-' },
-        { title: '规格', dataIndex: 'specification', key: 'specification', width: 160, ellipsis: true, render: (v) => v || '-' },
-        {
-            title: '京东划线价(元)',
-            dataIndex: 'jd_price',
-            key: 'jd_price',
-            width: 110,
-            render: (v) => (v ? `¥${v.toFixed(2)}` : '-'),
-        },
-        {
-            title: '成本价(元)',
-            dataIndex: 'cost_price',
-            key: 'cost_price',
-            width: 100,
-            render: (v) => (v ? `¥${v.toFixed(2)}` : '-'),
-        },
-        {
-            title: '代发价(元)',
-            dataIndex: 'price',
-            key: 'price',
-            width: 110,
-            sorter: true,
-            render: (v) => <span className="price-highlight">¥{v?.toFixed(2) ?? '0.00'}</span>,
-        },
-        { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 140, render: (v) => v || '-' },
-        { title: '供应商', dataIndex: 'supplier', key: 'supplier', width: 100, render: (v) => v || '-' },
-        {
-            title: '折扣率',
-            dataIndex: 'discount_rate',
-            key: 'discount_rate',
-            width: 80,
-            render: (v) => (v ? `${v}%` : '-'),
-        },
-        { title: '库存', dataIndex: 'stock', key: 'stock', width: 60 },
+        { title: '序号', key: 'index', width: 56, render: (_, __, index) => (page - 1) * pageSize + index + 1 },
+        { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 160, ellipsis: true, render: (v) => v || '-' },
+        { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 130, ellipsis: true, render: (v) => v || '-' },
+        { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160, ellipsis: true, render: (v) => v || '-' },
+        { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70, render: (v) => v || '-' },
+        { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 80, render: (v) => v || '-' },
+        { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 80, render: (v) => v || '-' },
+        { title: '备货商谈价', dataIndex: 'negotiation_price', key: 'negotiation_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 80, render: (v) => v || '-' },
+        { title: '上次进货价', dataIndex: 'last_purchase_price', key: 'last_purchase_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 70, sorter: true, render: (v) => (v ? `${v}%` : '-') },
+        { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '链接', dataIndex: 'shop_url', key: 'shop_url', width: 180, ellipsis: true, render: (v) => v || '-' },
+        { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '集采价/项目', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '代发价', dataIndex: 'price', key: 'price', width: 80, sorter: true, render: (v) => (v ? <span className="price-highlight">¥{v.toFixed(2)}</span> : '-') },
+        { title: '毛重(kg)', dataIndex: 'gross_weight', key: 'gross_weight', width: 70, render: (v) => (v ? v.toFixed(2) : '-') },
+        { title: '箱规', dataIndex: 'box_spec', key: 'box_spec', width: 120, render: (v) => v || '-' },
+        { title: '合作等级', dataIndex: 'cooperation_level', key: 'cooperation_level', width: 70, render: (v) => v || '-' },
+        { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 70, render: (v) => v || '-' },
+        { title: '规格', dataIndex: 'specification', key: 'specification', width: 130, ellipsis: true, render: (v) => v || '-' },
+        { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true, render: (v) => v || '-' },
+        { title: '代发运费', dataIndex: 'shipping_fee', key: 'shipping_fee', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 150, render: (v) => v || '-' },
+        { title: '销量', dataIndex: 'sales_volume', key: 'sales_volume', width: 60 },
+        { title: '推荐理由', dataIndex: 'recommendation', key: 'recommendation', width: 150, ellipsis: true, render: (v) => v || '-' },
+        { title: '参数', dataIndex: 'parameters', key: 'parameters', width: 100, ellipsis: true, render: (v) => v || '-' },
+        { title: '3C', dataIndex: 'cert_3c', key: 'cert_3c', width: 70, render: (v) => v || '-' },
         {
             title: '操作',
             key: 'action',
@@ -116,28 +97,30 @@ export default function ProductTable({
                     </Popconfirm>
                 </div>
             )}
-            <Table
-                rowKey="id"
-                columns={columns}
-                dataSource={dataSource}
-                loading={loading}
-                rowSelection={{
-                    selectedRowKeys,
-                    onChange: (keys) => onSelectChange(keys as number[]),
-                }}
-                pagination={{
-                    current: page,
-                    pageSize,
-                    total,
-                    showSizeChanger: true,
-                    showQuickJumper: true,
-                    showTotal: (t) => `共 ${t} 条`,
-                    onChange: onPageChange,
-                    pageSizeOptions: ['10', '20', '50', '100'],
-                }}
-                scroll={{ x: 1200 }}
-                size="middle"
-            />
+            <div style={{ overflow: 'auto', zoom: `${zoom}%` }}>
+                <Table
+                    rowKey="id"
+                    columns={columns}
+                    dataSource={dataSource}
+                    loading={loading}
+                    rowSelection={{
+                        selectedRowKeys,
+                        onChange: (keys) => onSelectChange(keys as number[]),
+                    }}
+                    pagination={{
+                        current: page,
+                        pageSize,
+                        total,
+                        showSizeChanger: true,
+                        showQuickJumper: true,
+                        showTotal: (t) => `共 ${t} 条`,
+                        onChange: onPageChange,
+                        pageSizeOptions: ['10', '20', '50', '100', '200', '500', '1000'],
+                    }}
+                    scroll={{ x: 2400 }}
+                    size="middle"
+                />
+            </div>
         </div>
     );
 }

@@ -13,7 +13,7 @@ import type {
 
 const api = axios.create({
     baseURL: '/api',
-    timeout: 30000,
+    timeout: 120000, // 默认超时 120 秒
 });
 
 // 响应拦截器
@@ -52,9 +52,7 @@ export async function deleteProduct(id: number): Promise<void> {
 }
 
 export async function batchDeleteProducts(ids: number[]): Promise<{ deleted: number }> {
-    const res = await api.delete<unknown, ApiResponse<{ deleted: number }>>('/products/batch/delete', {
-        data: { ids },
-    });
+    const res = await api.post<unknown, ApiResponse<{ deleted: number }>>('/products/batch/delete', { ids });
     return res.data;
 }
 
@@ -63,19 +61,14 @@ export async function fetchCategories(): Promise<string[]> {
     return res.data;
 }
 
-// ========== 商品图片 ==========
-
-export async function uploadProductImage(id: number, file: File): Promise<Product> {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post<unknown, ApiResponse<Product>>(`/products/${id}/image`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-    });
+export async function fetchBrands(): Promise<string[]> {
+    const res = await api.get<unknown, ApiResponse<string[]>>('/products/brands');
     return res.data;
 }
 
-export async function deleteProductImage(id: number): Promise<void> {
-    await api.delete(`/products/${id}/image`);
+export async function fetchCategoryLevel2(): Promise<string[]> {
+    const res = await api.get<unknown, ApiResponse<string[]>>('/products/categories/level2');
+    return res.data;
 }
 
 // ========== 数据导出 ==========
@@ -115,12 +108,16 @@ export async function uploadFile(file: File): Promise<UploadResult> {
     formData.append('file', file);
     const res = await api.post<unknown, ApiResponse<UploadResult>>('/import/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000, // 上传文件延长到 5 分钟
     });
     return res.data;
 }
 
 export async function confirmImport(data: ImportConfirmRequest): Promise<ImportResult> {
     const res = await api.post<unknown, ApiResponse<ImportResult>>('/import/confirm', data);
+    if (!res.data) {
+        throw new Error(res.message || '导入失败');
+    }
     return res.data;
 }
 
@@ -128,5 +125,10 @@ export async function confirmImport(data: ImportConfirmRequest): Promise<ImportR
 
 export async function smartQuery(data: SmartQueryRequest): Promise<SmartQueryResult> {
     const res = await api.post<unknown, ApiResponse<SmartQueryResult>>('/query/smart', data);
+    return res.data;
+}
+
+export async function aiSmartQuery(data: SmartQueryRequest): Promise<SmartQueryResult> {
+    const res = await api.post<unknown, ApiResponse<SmartQueryResult>>('/query/ai', data);
     return res.data;
 }

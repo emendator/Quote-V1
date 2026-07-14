@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.egg
 
 # Virtual environment
 .venv/
@@ -18,6 +19,20 @@ env/
 *.swp
 *.swo
 *~
+
+# Project - database & temporary files
+*.db
+backend/uploads/
+*.xlsx
+!frontend/src/**/*.xlsx
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Database
 *.db
@@ -46,3 +61,4 @@ test_*.json
 测试表*.xlsx
 import_payload.json
 upload_result.json
+/工作日报
