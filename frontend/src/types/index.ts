@@ -30,6 +30,7 @@ export interface Product {
     recommendation: string;
     parameters: string;
     cert_3c: string;
+    image: string;
     created_at: string;
     updated_at: string;
 }

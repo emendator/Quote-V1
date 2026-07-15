@@ -1,5 +1,5 @@
-import { Table, Button, Space, Popconfirm, Tag, Input } from 'antd';
-import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Popconfirm, Tag, Input, Image } from 'antd';
+import { EditOutlined, DeleteOutlined, CameraOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Product } from '../types';
 
@@ -36,6 +36,47 @@ export default function ProductTable({
         { title: '序号', key: 'index', width: 56, render: (_, __, index) => (page - 1) * pageSize + index + 1 },
         { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 160, ellipsis: true, render: (v) => v || '-' },
         { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 130, ellipsis: true, render: (v) => v || '-' },
+        {
+            title: '图片',
+            dataIndex: 'image',
+            key: 'image',
+            width: 80,
+            render: (v: string) => {
+                if (!v || v === '') {
+                    return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
+                }
+                // 判断是否为 base64 图片数据
+                if (v.startsWith('data:image')) {
+                    return (
+                        <Image
+                            src={v}
+                            alt="产品图片"
+                            width={50}
+                            height={50}
+                            style={{ objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }}
+                            preview={{
+                                mask: <CameraOutlined />,
+                            }}
+                            fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAiIGhlaWdodD0iNTAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjUwIiBoZWlnaHQ9IjUwIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjUiIHk9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5IiBmb250LXNpemU9IjEyIj7lm77niYc8L3RleHQ+PC9zdmc+"
+                        />
+                    );
+                }
+                // 可能是 URL 链接
+                return (
+                    <Image
+                        src={v}
+                        alt="产品图片"
+                        width={50}
+                        height={50}
+                        style={{ objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }}
+                        preview={{
+                            mask: <CameraOutlined />,
+                        }}
+                        fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAiIGhlaWdodD0iNTAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjUwIiBoZWlnaHQ9IjUwIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjUiIHk9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5IiBmb250LXNpemU9IjEyIj7lm77niYc8L3RleHQ+PC9zdmc+"
+                    />
+                );
+            },
+        },
         { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160, ellipsis: true, render: (v) => v || '-' },
         { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70, render: (v) => v || '-' },
         { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 80, render: (v) => v || '-' },

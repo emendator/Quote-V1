@@ -43,6 +43,7 @@ COLUMN_ALIAS_MAP: Dict[str, List[str]] = {
     "recommendation": ["推荐理由", "推荐", "推荐语", "recommendation", "recommend", "推荐说明", "主推理由", "荐推"],
     "parameters": ["参数", "商品参数", "技术参数", "parameters", "params", "规格参数", "详细参数", "性能参数"],
     "cert_3c": ["3C", "3C认证", "CCC认证", "cert_3c", "ccc", "3c证书", "CCC", "3C编号", "强制认证"],
+    "image": ["图片", "产品图片", "商品图片", "image", "pic", "picture", "photo", "图像", "产品图", "主图"],
 }
 
 # 存储上传文件的临时数据（生产环境应使用 Redis 等）
@@ -156,7 +157,28 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
     if not existing_fields:
         raise ValueError("映射后没有匹配到任何数据库字段，请检查列映射配置")
 
+    # ---- 处理从 Excel 提取的图片数据 ----
+    if "_excel_image" in df.columns:
+        # 将提取的图片数据合并到 image 字段
+        if "image" not in existing_fields:
+            existing_fields.append("image")
+        for idx, row in df.iterrows():
+            val = row.get("_excel_image")
+            if val and str(val) != "nan" and str(val) != "None" and str(val).startswith("data:image"):
+                # 如果用户也映射了图片列且有内容，不覆盖
+                existing_img = row.get("image", "")
+                if not existing_img or str(existing_img) in ("nan", "None", ""):
+                    df.at[idx, "image"] = val
+        # 移除临时列
+        df.drop(columns=["_excel_image"], inplace=True, errors="ignore")
+        # 确保 existing_fields 不包含 _excel_image
+        existing_fields = [f for f in existing_fields if f != "_excel_image"]
+
     # 只保留已知字段的列（避免重复列名问题）
+    existing_fields_in_df = [f for f in existing_fields if f in df.columns]
+    if not existing_fields_in_df:
+        raise ValueError("映射后没有匹配到任何数据库字段，请检查列映射配置")
+    existing_fields = existing_fields_in_df
     df = df[existing_fields]
 
     # 确保没有重复列名（防御性检查）
@@ -214,7 +236,7 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                 # 其他字符字段若为 None 则转空白字符串，避免 NULL 冲突
                 string_fields = ["product_name", "price_update", "shop_url", "box_spec",
                                  "cooperation_level", "supply_status", "specification",
-                                 "remark", "recommendation", "parameters", "cert_3c"]
+                                 "remark", "recommendation", "parameters", "cert_3c", "image"]
                 for sf in string_fields:
                     if sf in row_data and row_data[sf] is None:
                         row_data[sf] = ""

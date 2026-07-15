@@ -82,3 +82,28 @@ body {
 .toolbar .ant-input-search {
     width: 280px;
 }
+
+/* 图片预览相关样式 */
+.product-image-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.product-image-thumb {
+    border-radius: 4px;
+    object-fit: cover;
+    border: 1px solid #e8e8e8;
+    transition: transform 0.2s;
+}
+
+.product-image-thumb:hover {
+    transform: scale(1.1);
+    border-color: #1677ff;
+}
+
+.no-image-placeholder {
+    color: #ccc;
+    font-size: 12px;
+    text-align: center;
+}

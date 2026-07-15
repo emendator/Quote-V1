@@ -35,6 +35,7 @@ class ProductCreate(BaseModel):
     recommendation: str = ""
     parameters: str = ""
     cert_3c: str = ""
+    image: str = ""
 
     class Config:
         populate_by_name = True
@@ -69,6 +70,7 @@ class ProductUpdate(BaseModel):
     recommendation: Optional[str] = None
     parameters: Optional[str] = None
     cert_3c: Optional[str] = None
+    image: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -105,6 +107,7 @@ class ProductResponse(BaseModel):
     recommendation: Optional[str] = ""
     parameters: Optional[str] = ""
     cert_3c: Optional[str] = ""
+    image: Optional[str] = ""
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

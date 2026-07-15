@@ -43,6 +43,7 @@ class Product(Base):
     recommendation = Column(Text, default="", comment="推荐理由")
     parameters = Column(Text, default="", comment="参数")
     cert_3c = Column(String(200), default="", comment="3C")
+    image = Column(Text, default="", comment="产品图片(Base64编码)")
     created_at = Column(DateTime, default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment="更新时间")
 
@@ -78,6 +79,7 @@ class Product(Base):
             "recommendation": self.recommendation,
             "parameters": self.parameters,
             "cert_3c": self.cert_3c,
+            "image": self.image or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

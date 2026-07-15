@@ -31,6 +31,7 @@ const DB_FIELDS = [
     { value: 'recommendation', label: '推荐理由' },
     { value: 'parameters', label: '参数' },
     { value: 'cert_3c', label: '3C' },
+    { value: 'image', label: '图片' },
 ];
 
 interface Props {

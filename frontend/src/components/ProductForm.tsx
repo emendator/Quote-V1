@@ -142,6 +142,9 @@ export default function ProductForm({ open, editingProduct, onClose, onSuccess }
                 <Form.Item name="cert_3c" label="3C">
                     <Input placeholder="3C认证编号" />
                 </Form.Item>
+                <Form.Item name="image" label="产品图片">
+                    <Input.TextArea rows={2} placeholder="粘贴图片Base64编码或URL，也可通过Excel导入自动提取" />
+                </Form.Item>
             </Form>
         </Modal>
     );

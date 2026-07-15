@@ -136,7 +136,7 @@ async def export_products(
         ("箱规", 12), ("合作等级", 12), ("供货状态", 12),
         ("规格", 20), ("备注", 20), ("代发运费(元)", 14),
         ("69码", 16), ("销量", 10), ("推荐理由", 20),
-        ("参数", 20), ("3C", 16),
+        ("参数", 20), ("3C", 16), ("图片", 12),
     ]
     for col_idx, (header_text, width) in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=header_text)
@@ -160,6 +160,7 @@ async def export_products(
             item.specification, item.remark, item.shipping_fee or 0,
             item.barcode_69, item.sales_volume, item.recommendation,
             item.parameters, item.cert_3c,
+            "[图片]" if item.image else "",
         ]
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
