@@ -7,6 +7,7 @@ export interface Product {
     brand: string;
     category_level1: string;
     category_level2: string;
+    category_level3: string;
     negotiation_price: number | null;
     price_update: string;
     last_purchase_price: number | null;
@@ -87,6 +88,26 @@ export interface SmartQueryResult {
     unrecognized_text: string;
 }
 
+// ========== 批量快查型号查询 ==========
+
+export interface BatchModelQueryItem {
+    query: string;
+    results: Product[];
+    count: number;
+    message: string;
+}
+
+export interface BatchModelQueryResult {
+    total_queries: number;
+    total_results: number;
+    items: BatchModelQueryItem[];
+}
+
+export interface BatchModelQueryRequest {
+    queries: string[];
+    fuzzy: boolean;
+}
+
 // 导入相关
 export interface UploadResult {
     file_id: string;
@@ -109,4 +130,102 @@ export interface ImportResult {
     skip_rows: number;
     error_rows: number;
     errors: { row: number; reason: string }[];
+}
+
+// ========== 平台配置相关 ==========
+
+export interface PlatformConfig {
+    id: number;
+    name: string;
+    platform_type: string;
+    api_base_url: string;
+    api_key: string;
+    api_secret: string;
+    shop_id: string;
+    extra_config: Record<string, unknown>;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface PlatformConfigCreate {
+    name: string;
+    platform_type: string;
+    api_base_url?: string;
+    api_key?: string;
+    api_secret?: string;
+    shop_id?: string;
+    extra_config?: Record<string, unknown>;
+    is_active?: boolean;
+}
+
+export interface PlatformConfigUpdate {
+    name?: string;
+    platform_type?: string;
+    api_base_url?: string;
+    api_key?: string;
+    api_secret?: string;
+    shop_id?: string;
+    extra_config?: Record<string, unknown>;
+    is_active?: boolean;
+}
+
+// ========== 一键上架相关 ==========
+
+export interface ListingSubmitRequest {
+    product_ids: number[];
+    platform_ids: number[];
+}
+
+export interface ListingResultItem {
+    product_id: number;
+    platform_id: number;
+    status: string;
+    platform_product_id: string;
+    error_message: string;
+}
+
+export interface ListingSubmitResponse {
+    total: number;
+    success: number;
+    failed: number;
+    results: ListingResultItem[];
+}
+
+export interface ListingLog {
+    id: number;
+    product_id: number;
+    product_model: string;
+    product_name: string;
+    platform_id: number;
+    platform_name: string;
+    status: string;
+    platform_product_id: string;
+    error_message: string;
+    created_at: string;
+}
+
+export interface ListingLogDetail extends ListingLog {
+    request_data: Record<string, unknown>;
+    response_data: Record<string, unknown>;
+}
+
+export interface ListingLogQuery {
+    page?: number;
+    page_size?: number;
+    status?: string;
+    platform_id?: number;
+    product_id?: number;
+}
+
+export interface PaginatedListingLogs {
+    items: ListingLog[];
+    total: number;
+    page: number;
+    page_size: number;
+}
+
+export interface TestConnectionResult {
+    success: boolean;
+    message: string;
 }

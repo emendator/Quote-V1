@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Input, Space, message, Select, Slider, Typography } from 'antd';
-import { DownloadOutlined, PlusOutlined, ImportOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, ImportOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, ShoppingCartOutlined } from '@ant-design/icons';
 import ProductTable from '../components/ProductTable';
 import ProductForm from '../components/ProductForm';
 import ImportDialog from '../components/ImportDialog';
+import ListingDialog from '../components/ListingDialog';
 import {
     fetchProducts, fetchCategories, deleteProduct, batchDeleteProducts, exportProducts,
 } from '../services/api';
 import type { Product } from '../types';
+import { usePageState } from '../store/PageStateContext';
 
 const { Search } = Input;
 const { Text } = Typography;
@@ -16,12 +18,23 @@ export default function DataManagePage() {
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(false);
     const [total, setTotal] = useState(0);
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(20);
-    const [keyword, setKeyword] = useState('');
-    const [category, setCategory] = useState<string | undefined>(undefined);
     const [categories, setCategories] = useState<string[]>([]);
     const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+
+    // 持久化状态：切换页面后保留分页/搜索/缩放/排序
+    const [pageState, setPageState] = usePageState('data', {
+        page: 1,
+        pageSize: 20,
+        keyword: '',
+        category: undefined as string | undefined,
+        zoom: 100,
+        sortBy: 'created_at' as string,
+        sortOrder: 'desc' as string,
+    });
+    const { page, pageSize, keyword, category, zoom, sortBy, sortOrder } = pageState;
+    const updateState = useCallback((patch: Partial<typeof pageState>) => {
+        setPageState({ ...pageState, ...patch });
+    }, [pageState, setPageState]);
 
     // 表单弹窗
     const [formOpen, setFormOpen] = useState(false);
@@ -30,8 +43,10 @@ export default function DataManagePage() {
     // 导入弹窗
     const [importOpen, setImportOpen] = useState(false);
 
+    // 一键上架弹窗
+    const [listingOpen, setListingOpen] = useState(false);
+
     // 表格缩放
-    const [zoom, setZoom] = useState(100);
     const ZOOM_MIN = 50;
     const ZOOM_MAX = 200;
     const ZOOM_STEP = 10;
@@ -44,6 +59,8 @@ export default function DataManagePage() {
                 page_size: pageSize,
                 keyword: keyword || undefined,
                 category,
+                sort_by: sortBy,
+                sort_order: sortOrder,
             });
             setProducts(data.items);
             setTotal(data.total);
@@ -70,8 +87,7 @@ export default function DataManagePage() {
     }, [loadData]);
 
     const handleSearch = (value: string) => {
-        setKeyword(value);
-        setPage(1);
+        updateState({ keyword: value, page: 1 });
     };
 
     const handleAdd = () => {
@@ -139,8 +155,7 @@ export default function DataManagePage() {
                     style={{ width: 150 }}
                     value={category}
                     onChange={(val) => {
-                        setCategory(val);
-                        setPage(1);
+                        updateState({ category: val, page: 1 });
                     }}
                     options={categories.map((c) => ({ value: c, label: c }))}
                 />
@@ -151,7 +166,7 @@ export default function DataManagePage() {
                         size="small"
                         icon={<ZoomOutOutlined />}
                         disabled={zoom <= ZOOM_MIN}
-                        onClick={() => setZoom(Math.max(ZOOM_MIN, zoom - ZOOM_STEP))}
+                        onClick={() => updateState({ zoom: Math.max(ZOOM_MIN, zoom - ZOOM_STEP) })}
                     />
                     <Slider
                         style={{ width: 80, margin: '0 4px' }}
@@ -159,14 +174,14 @@ export default function DataManagePage() {
                         max={ZOOM_MAX}
                         step={ZOOM_STEP}
                         value={zoom}
-                        onChange={setZoom}
+                        onChange={(v) => updateState({ zoom: v })}
                         tooltip={{ formatter: (v) => `${v}%` }}
                     />
                     <Button
                         size="small"
                         icon={<ZoomInOutlined />}
                         disabled={zoom >= ZOOM_MAX}
-                        onClick={() => setZoom(Math.min(ZOOM_MAX, zoom + ZOOM_STEP))}
+                        onClick={() => updateState({ zoom: Math.min(ZOOM_MAX, zoom + ZOOM_STEP) })}
                     />
                     <Text type="secondary" style={{ fontSize: 12, minWidth: 36, textAlign: 'center' }}>
                         {zoom}%
@@ -179,6 +194,13 @@ export default function DataManagePage() {
                     </Button>
                     <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
                         导入数据
+                    </Button>
+                    <Button
+                        icon={<ShoppingCartOutlined />}
+                        onClick={() => setListingOpen(true)}
+                        disabled={selectedKeys.length === 0}
+                    >
+                        一键上架 ({selectedKeys.length})
                     </Button>
                     <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
                         新增商品
@@ -194,9 +216,13 @@ export default function DataManagePage() {
                 pageSize={pageSize}
                 selectedRowKeys={selectedKeys}
                 zoom={zoom}
+                sortBy={sortBy}
+                sortOrder={sortOrder}
                 onPageChange={(p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
+                    updateState({ page: p, pageSize: ps });
+                }}
+                onSortChange={(field, order) => {
+                    updateState({ sortBy: field, sortOrder: order, page: 1 });
                 }}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
@@ -214,6 +240,13 @@ export default function DataManagePage() {
             <ImportDialog
                 open={importOpen}
                 onClose={() => setImportOpen(false)}
+                onSuccess={loadData}
+            />
+
+            <ListingDialog
+                open={listingOpen}
+                selectedProductIds={selectedKeys}
+                onClose={() => setListingOpen(false)}
                 onSuccess={loadData}
             />
         </div>

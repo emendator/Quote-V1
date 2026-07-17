@@ -46,6 +46,8 @@ class MessageParser:
     CATEGORY_LEVEL1_PATTERN = re.compile(r"(?:一级品类|大类|一级分类|主分类)[是为]?\s*(.{1,20}?)(?:的|所有|商品|产品|报价|价格|，|。|$)")
     # 二级品类查询
     CATEGORY_LEVEL2_PATTERN = re.compile(r"(?:二级品类|小类|二级分类|子分类)[是为]?\s*(.{1,20}?)(?:的|所有|商品|产品|报价|价格|，|。|$)")
+    # 三级品类查询
+    CATEGORY_LEVEL3_PATTERN = re.compile(r"(?:三级品类|三级分类|细分类|三级类别)[是为]?\s*(.{1,20}?)(?:的|所有|商品|产品|报价|价格|，|。|$)")
     # 品类通用查询（一级+二级都用）
     CATEGORY_PATTERN = re.compile(r"(?:品类|分类|类别)[是为]?\s*(.{1,20}?)(?:的|所有|商品|产品|报价|价格|，|。|$)")
     # 合作等级查询
@@ -429,7 +431,17 @@ class MessageParser:
                     found_patterns.add(key)
                     queries.append({"type": "category_level2_search", "value": cl})
 
-        # 12. 提取品类（通用，同时搜一级+二级）
+        # 11.5 提取三级品类
+        cl3_matches = self.CATEGORY_LEVEL3_PATTERN.findall(text)
+        for cl in cl3_matches:
+            cl = cl.strip()
+            if cl and len(cl) >= 1:
+                key = f"category_level3_{cl}"
+                if key not in found_patterns:
+                    found_patterns.add(key)
+                    queries.append({"type": "category_level3_search", "value": cl})
+
+        # 12. 提取品类（通用，同时搜一级+二级+三级）
         cat_matches = self.CATEGORY_PATTERN.findall(text)
         for c in cat_matches:
             c = c.strip()

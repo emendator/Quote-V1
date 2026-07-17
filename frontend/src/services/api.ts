@@ -6,9 +6,20 @@ import type {
     ProductQuery,
     SmartQueryRequest,
     SmartQueryResult,
+    BatchModelQueryRequest,
+    BatchModelQueryResult,
     UploadResult,
     ImportConfirmRequest,
     ImportResult,
+    PlatformConfig,
+    PlatformConfigCreate,
+    PlatformConfigUpdate,
+    TestConnectionResult,
+    ListingSubmitRequest,
+    ListingSubmitResponse,
+    ListingLogQuery,
+    PaginatedListingLogs,
+    ListingLogDetail,
 } from '../types';
 
 const api = axios.create({
@@ -71,6 +82,11 @@ export async function fetchCategoryLevel2(): Promise<string[]> {
     return res.data;
 }
 
+export async function fetchCategoryLevel3(): Promise<string[]> {
+    const res = await api.get<unknown, ApiResponse<string[]>>('/products/categories/level3');
+    return res.data;
+}
+
 // ========== 数据导出 ==========
 
 export async function exportProducts(
@@ -130,5 +146,55 @@ export async function smartQuery(data: SmartQueryRequest): Promise<SmartQueryRes
 
 export async function aiSmartQuery(data: SmartQueryRequest): Promise<SmartQueryResult> {
     const res = await api.post<unknown, ApiResponse<SmartQueryResult>>('/query/ai', data);
+    return res.data;
+}
+
+// ========== 批量快查型号查询 ==========
+
+export async function batchModelQuery(data: BatchModelQueryRequest): Promise<BatchModelQueryResult> {
+    const res = await api.post<unknown, ApiResponse<BatchModelQueryResult>>('/query/batch-models', data);
+    return res.data;
+}
+
+// ========== 平台配置管理 ==========
+
+export async function fetchPlatforms(): Promise<PlatformConfig[]> {
+    const res = await api.get<unknown, ApiResponse<PlatformConfig[]>>('/platforms');
+    return res.data;
+}
+
+export async function createPlatform(data: PlatformConfigCreate): Promise<PlatformConfig> {
+    const res = await api.post<unknown, ApiResponse<PlatformConfig>>('/platforms', data);
+    return res.data;
+}
+
+export async function updatePlatform(id: number, data: PlatformConfigUpdate): Promise<PlatformConfig> {
+    const res = await api.put<unknown, ApiResponse<PlatformConfig>>(`/platforms/${id}`, data);
+    return res.data;
+}
+
+export async function deletePlatform(id: number): Promise<void> {
+    await api.delete(`/platforms/${id}`);
+}
+
+export async function testPlatformConnection(id: number): Promise<TestConnectionResult> {
+    const res = await api.post<unknown, ApiResponse<TestConnectionResult>>(`/platforms/${id}/test`);
+    return res.data;
+}
+
+// ========== 一键上架 ==========
+
+export async function submitListing(data: ListingSubmitRequest): Promise<ListingSubmitResponse> {
+    const res = await api.post<unknown, ApiResponse<ListingSubmitResponse>>('/listing/submit', data);
+    return res.data;
+}
+
+export async function fetchListingLogs(params: ListingLogQuery = {}): Promise<PaginatedListingLogs> {
+    const res = await api.get<unknown, ApiResponse<PaginatedListingLogs>>('/listing/logs', { params });
+    return res.data;
+}
+
+export async function fetchListingLogDetail(id: number): Promise<ListingLogDetail> {
+    const res = await api.get<unknown, ApiResponse<ListingLogDetail>>(`/listing/logs/${id}`);
     return res.data;
 }

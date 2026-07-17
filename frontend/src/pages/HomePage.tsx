@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Select, Row, Col, Divider, message } from 'antd';
 import SmartQueryInput from '../components/SmartQueryInput';
 import QueryResult from '../components/QueryResult';
-import { smartQuery, aiSmartQuery, fetchCategories, fetchBrands, fetchCategoryLevel2 } from '../services/api';
-import type { SmartQueryResult } from '../types';
+import { smartQuery, aiSmartQuery, batchModelQuery, fetchCategories, fetchBrands, fetchCategoryLevel2, fetchCategoryLevel3 } from '../services/api';
+import type { SmartQueryResult, BatchModelQueryResult } from '../types';
+import { usePageState } from '../store/PageStateContext';
 
 // 价格档位选项
 const PRICE_RANGES = [
@@ -24,36 +25,60 @@ const PRICE_RANGES = [
 
 export default function HomePage() {
     const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState<SmartQueryResult | null>(null);
 
-    // 筛选选项数据
+    // ====== 持久化状态：切换页面后保留 ======
+    const [pageState, setPageState] = usePageState('home', {
+        queryText: '',
+        useAI: false,
+        batchMode: false,
+        result: null as SmartQueryResult | BatchModelQueryResult | null,
+        filterCat1: undefined as string | undefined,
+        filterBrand: undefined as string | undefined,
+        filterCat2: undefined as string | undefined,
+        filterCat3: undefined as string | undefined,
+        filterPrice: '',
+        filterNego: '',
+        filterPurchase: '',
+        filterRetail: '',
+        filterDiscount: '',
+    });
+
+    const { queryText, useAI, batchMode, result } = pageState;
+    const { filterCat1, filterBrand, filterCat2, filterCat3, filterPrice, filterNego, filterPurchase, filterRetail, filterDiscount } = pageState;
+
+    const updateState = useCallback((patch: Partial<typeof pageState>) => {
+        setPageState({ ...pageState, ...patch });
+    }, [pageState, setPageState]);
+
+    // 筛选选项数据（非持久化）
     const [categories, setCategories] = useState<string[]>([]);
     const [brands, setBrands] = useState<string[]>([]);
     const [categoryLevel2, setCategoryLevel2] = useState<string[]>([]);
-
-    // 筛选状态
-    const [filterCat1, setFilterCat1] = useState<string | undefined>(undefined);
-    const [filterBrand, setFilterBrand] = useState<string | undefined>(undefined);
-    const [filterCat2, setFilterCat2] = useState<string | undefined>(undefined);
-    const [filterPrice, setFilterPrice] = useState<string>('');
-    const [filterNego, setFilterNego] = useState<string>('');
-    const [filterPurchase, setFilterPurchase] = useState<string>('');
-    const [filterRetail, setFilterRetail] = useState<string>('');
-    const [filterDiscount, setFilterDiscount] = useState<string>('');
-
-    // 输入框文本（由 SmartQueryInput 同步上来）
-    const [queryText, setQueryText] = useState('');
-    const [useAI, setUseAI] = useState(false);
+    const [categoryLevel3, setCategoryLevel3] = useState<string[]>([]);
 
     const isFirstRender = useRef(true);
+    const hasRestoredState = useRef(false);
 
     useEffect(() => {
         fetchCategories().then(setCategories).catch(() => { });
         fetchBrands().then(setBrands).catch(() => { });
         fetchCategoryLevel2().then(setCategoryLevel2).catch(() => { });
+        fetchCategoryLevel3().then(setCategoryLevel3).catch(() => { });
     }, []);
 
-    // 筛选项变动时自动触发查询
+    // 首次挂载时，如果恢复的页面有查询文本或筛选条件，自动触发查询
+    useEffect(() => {
+        if (!hasRestoredState.current) {
+            hasRestoredState.current = true;
+            if (queryText.trim() || filterCat1 || filterBrand || filterCat2 || filterCat3 || filterPrice || filterNego || filterPurchase || filterRetail || filterDiscount) {
+                // 延迟执行，确保 DOM 已更新
+                setTimeout(() => doQuery(), 100);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // 筛选项变动时自动触发查询（排除首次）
     useEffect(() => {
         if (isFirstRender.current) {
             isFirstRender.current = false;
@@ -61,7 +86,7 @@ export default function HomePage() {
         }
         doQuery();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filterCat1, filterBrand, filterCat2, filterPrice, filterNego, filterPurchase, filterRetail, filterDiscount]);
+    }, [filterCat1, filterBrand, filterCat2, filterCat3, filterPrice, filterNego, filterPurchase, filterRetail, filterDiscount]);
 
     const buildQueryText = (text: string): string => {
         const parts: string[] = [];
@@ -69,6 +94,7 @@ export default function HomePage() {
         if (filterCat1) parts.push(`一级品类为${filterCat1}`);
         if (filterBrand) parts.push(`品牌为${filterBrand}`);
         if (filterCat2) parts.push(`二级品类为${filterCat2}`);
+        if (filterCat3) parts.push(`三级品类为${filterCat3}`);
 
         const priceFieldMap: Record<string, string> = {
             price: '代发价',
@@ -96,24 +122,45 @@ export default function HomePage() {
         return parts.join('。');
     };
 
-    const doQuery = async (textOverride?: string, aiOverride?: boolean) => {
+    const doQuery = async (textOverride?: string, aiOverride?: boolean, batchOverride?: boolean) => {
         const finalText = textOverride !== undefined ? textOverride : queryText;
         const finalAI = aiOverride !== undefined ? aiOverride : useAI;
-        const queryText_ = buildQueryText(finalText);
-        if (!queryText_.trim()) return;
-
-        if (finalAI === undefined) return;
+        const finalBatch = batchOverride !== undefined ? batchOverride : batchMode;
 
         setLoading(true);
         try {
-            const data = finalAI
-                ? await aiSmartQuery({ query_text: queryText_ })
-                : await smartQuery({ query_text: queryText_ });
-            setResult(data);
-            if (data.result_count === 0 && data.query_intent !== 'mixed') {
-                message.info(data.message || '未找到匹配的商品');
-            } else if (data.result_count > 0) {
-                message.success(`找到 ${data.result_count} 条结果`);
+            if (finalBatch) {
+                // 批量快查型号查询：按空格拆分
+                const items = finalText.split(/\s+/)
+                    .map(s => s.trim())
+                    .filter(s => s.length > 0);
+                if (items.length === 0) {
+                    message.warning('请输入要查询的快查型号，用空格分隔');
+                    setLoading(false);
+                    return;
+                }
+                const data = await batchModelQuery({ queries: items, fuzzy: true });
+                updateState({ result: data });
+                if (data.total_results > 0) {
+                    message.success(`批量查询完成，共找到 ${data.total_results} 条结果`);
+                } else {
+                    message.info('未找到匹配的商品');
+                }
+            } else {
+                const queryText_ = buildQueryText(finalText);
+                if (!queryText_.trim()) {
+                    setLoading(false);
+                    return;
+                }
+                const data = finalAI
+                    ? await aiSmartQuery({ query_text: queryText_ })
+                    : await smartQuery({ query_text: queryText_ });
+                updateState({ result: data });
+                if (data.result_count === 0 && data.query_intent !== 'mixed') {
+                    message.info(data.message || '未找到匹配的商品');
+                } else if (data.result_count > 0) {
+                    message.success(`找到 ${data.result_count} 条结果`);
+                }
             }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : '查询失败';
@@ -123,10 +170,25 @@ export default function HomePage() {
         }
     };
 
-    const handleQuery = (text: string, aiMode: boolean) => {
-        setQueryText(text);
-        setUseAI(aiMode);
-        doQuery(text, aiMode);
+    const handleQuery = (text: string, aiMode: boolean, useBatch?: boolean) => {
+        const finalBatch = useBatch !== undefined ? useBatch : batchMode;
+        const patch: Partial<typeof pageState> = { queryText: text, useAI: aiMode, batchMode: finalBatch };
+        // 如果模式变了，清空结果避免类型不匹配白屏
+        if (finalBatch !== batchMode || (result && 'total_queries' in result) !== finalBatch) {
+            patch.result = null;
+        }
+        updateState(patch);
+        doQuery(text, aiMode, useBatch);
+    };
+
+    const handleValueChange = (text: string, ai: boolean, batch?: boolean) => {
+        const patch: Partial<typeof pageState> = { queryText: text, useAI: ai };
+        if (batch !== undefined) {
+            patch.batchMode = batch;
+            // 切换批量模式时清空结果，避免类型不匹配导致白屏
+            patch.result = null;
+        }
+        updateState(patch);
     };
 
     // 价格筛选器通用组件
@@ -150,76 +212,92 @@ export default function HomePage() {
             <SmartQueryInput
                 value={queryText}
                 aiMode={useAI}
-                onValueChange={(text, ai) => { setQueryText(text); setUseAI(ai); }}
+                batchMode={batchMode}
+                onValueChange={handleValueChange}
                 onQuery={handleQuery}
                 loading={loading}
             />
 
             <Divider style={{ margin: '8px 0 12px' }} />
 
-            {/* 第一行：一级品类 / 品牌 / 二级品类 */}
-            <Row gutter={[8, 8]} style={{ marginBottom: 8 }}>
-                <Col span={8}>
-                    <Select
-                        placeholder="一级品类"
-                        allowClear
-                        showSearch
-                        value={filterCat1}
-                        onChange={setFilterCat1}
-                        style={{ width: '100%' }}
-                        options={categories.map((c) => ({ value: c, label: c }))}
-                    />
-                </Col>
-                <Col span={8}>
-                    <Select
-                        placeholder="品牌"
-                        allowClear
-                        showSearch
-                        value={filterBrand}
-                        onChange={setFilterBrand}
-                        style={{ width: '100%' }}
-                        options={brands.map((b) => ({ value: b, label: b }))}
-                    />
-                </Col>
-                <Col span={8}>
-                    <Select
-                        placeholder="二级品类"
-                        allowClear
-                        showSearch
-                        value={filterCat2}
-                        onChange={setFilterCat2}
-                        style={{ width: '100%' }}
-                        options={categoryLevel2.map((c) => ({ value: c, label: c }))}
-                    />
-                </Col>
-            </Row>
+            {!batchMode && (
+                <>
+                    {/* 第一行：品类 / 品牌 筛选 */}
+                    <Row gutter={[8, 8]} style={{ marginBottom: 8 }}>
+                        <Col span={6}>
+                            <Select
+                                placeholder="一级品类"
+                                allowClear
+                                showSearch
+                                value={filterCat1}
+                                onChange={(v) => updateState({ filterCat1: v })}
+                                style={{ width: '100%' }}
+                                options={categories.map((c) => ({ value: c, label: c }))}
+                            />
+                        </Col>
+                        <Col span={6}>
+                            <Select
+                                placeholder="品牌"
+                                allowClear
+                                showSearch
+                                value={filterBrand}
+                                onChange={(v) => updateState({ filterBrand: v })}
+                                style={{ width: '100%' }}
+                                options={brands.map((b) => ({ value: b, label: b }))}
+                            />
+                        </Col>
+                        <Col span={6}>
+                            <Select
+                                placeholder="二级品类"
+                                allowClear
+                                showSearch
+                                value={filterCat2}
+                                onChange={(v) => updateState({ filterCat2: v })}
+                                style={{ width: '100%' }}
+                                options={categoryLevel2.map((c) => ({ value: c, label: c }))}
+                            />
+                        </Col>
+                        <Col span={6}>
+                            <Select
+                                placeholder="三级品类"
+                                allowClear
+                                showSearch
+                                value={filterCat3}
+                                onChange={(v) => updateState({ filterCat3: v })}
+                                style={{ width: '100%' }}
+                                options={categoryLevel3.map((c) => ({ value: c, label: c }))}
+                            />
+                        </Col>
+                    </Row>
 
-            {/* 第二行：价格 / 折扣率 */}
-            <Row gutter={[8, 8]} style={{ marginBottom: 0 }}>
-                <Col span={4}>{renderPriceSelect('代发价', filterPrice, setFilterPrice)}</Col>
-                <Col span={5}>{renderPriceSelect('备货商谈价', filterNego, setFilterNego)}</Col>
-                <Col span={4}>{renderPriceSelect('进货价', filterPurchase, setFilterPurchase)}</Col>
-                <Col span={4}>{renderPriceSelect('零售价', filterRetail, setFilterRetail)}</Col>
-                <Col span={4}>
-                    <Select
-                        placeholder="折扣率"
-                        allowClear
-                        value={filterDiscount || undefined}
-                        onChange={(v) => setFilterDiscount(v || '')}
-                        style={{ width: '100%' }}
-                        options={[
-                            { value: '', label: '全部' },
-                            { value: '折扣率在0到30', label: '≤ 30%' },
-                            { value: '折扣率在30到50', label: '30% - 50%' },
-                            { value: '折扣率在50到70', label: '50% - 70%' },
-                            { value: '折扣率在70到90', label: '70% - 90%' },
-                            { value: '折扣率在90到100', label: '≥ 90%' },
-                        ]}
-                    />
-                </Col>
-            </Row>
+                    {/* 第二行：价格 / 折扣率 */}
+                    <Row gutter={[8, 8]} style={{ marginBottom: 0 }}>
+                        <Col span={4}>{renderPriceSelect('代发价', filterPrice, (v) => updateState({ filterPrice: v }))}</Col>
+                        <Col span={5}>{renderPriceSelect('备货商谈价', filterNego, (v) => updateState({ filterNego: v }))}</Col>
+                        <Col span={4}>{renderPriceSelect('进货价', filterPurchase, (v) => updateState({ filterPurchase: v }))}</Col>
+                        <Col span={4}>{renderPriceSelect('零售价', filterRetail, (v) => updateState({ filterRetail: v }))}</Col>
+                        <Col span={4}>
+                            <Select
+                                placeholder="折扣率"
+                                allowClear
+                                value={filterDiscount || undefined}
+                                onChange={(v) => updateState({ filterDiscount: v || '' })}
+                                style={{ width: '100%' }}
+                                options={[
+                                    { value: '', label: '全部' },
+                                    { value: '折扣率在0到30', label: '≤ 30%' },
+                                    { value: '折扣率在30到50', label: '30% - 50%' },
+                                    { value: '折扣率在50到70', label: '50% - 70%' },
+                                    { value: '折扣率在70到90', label: '70% - 90%' },
+                                    { value: '折扣率在90到100', label: '≥ 90%' },
+                                ]}
+                            />
+                        </Col>
+                    </Row>
+                </>
+            )}
 
-            <QueryResult result={result} />
+            <QueryResult result={result} batchMode={batchMode} />
         </div>
     );
 }

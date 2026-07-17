@@ -32,8 +32,18 @@ async def get_db() -> AsyncSession:
 
 
 async def _migrate_db(conn):
-    """执行数据库迁移：添加缺失的列"""
-    # 检查并添加 image 列
+    """执行数据库迁移：添加缺失的列，移除旧约束"""
+    # 移除 quick_model 上的 UNIQUE 索引（改为 6 字段联合去重）
+    try:
+        # SQLite 中 UNIQUE 约束对应的索引名
+        unique_indexes = ["ix_products_quick_model", "uq_products_quick_model"]
+        for idx_name in unique_indexes:
+            await conn.execute(text(f"DROP INDEX IF EXISTS {idx_name}"))
+            logger.info(f"数据库迁移: 已移除索引 {idx_name}")
+    except Exception as e:
+        logger.warning(f"数据库迁移: 移除索引跳过: {e}")
+
+    # 检查并添加缺失的列
     migrations = [
         ("products", "image", "TEXT DEFAULT ''"),
     ]

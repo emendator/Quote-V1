@@ -133,6 +133,11 @@ class QueryEngine:
                 params = {"category_level2": query["value"]}
                 msg = f"二级品类为「{query['value']}」的商品共 {total} 个" if total > 0 else f"未找到二级品类「{query['value']}」的商品"
 
+            elif qtype == "category_level3_search":
+                products, total = await self._query_by_category_level3(db, query["value"], sort_order)
+                params = {"category_level3": query["value"]}
+                msg = f"三级品类为「{query['value']}」的商品共 {total} 个" if total > 0 else f"未找到三级品类「{query['value']}」的商品"
+
             elif qtype == "category_search":
                 products, total = await self._query_by_category(db, query["value"], sort_order)
                 params = {"category": query["value"]}
@@ -311,6 +316,39 @@ class QueryEngine:
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)
 
+    async def _query_by_quick_model(self, db, model: str, sort_order=None, fuzzy: bool = True):
+        """按快查型号查询（支持模糊匹配）"""
+        if fuzzy:
+            q = select(Product).where(Product.quick_model.ilike(f"%{model}%"))
+        else:
+            q = select(Product).where(Product.quick_model == model)
+        q = await self._apply_sort(q, Product, sort_order)
+        return await self._execute_and_fetch(db, q)
+
+    async def execute_batch_model_query(
+        self, db: AsyncSession, queries: list, fuzzy: bool = True
+    ) -> dict:
+        """批量快查型号查询：每个查询独立执行，返回分组结果"""
+        items = []
+        for q_text in queries:
+            q_text = q_text.strip()
+            if not q_text:
+                continue
+            products, total = await self._query_by_quick_model(db, q_text, fuzzy=fuzzy)
+            items.append({
+                "query": q_text,
+                "results": [p.to_dict() for p in products],
+                "count": total,
+                "message": f"快查型号包含「{q_text}」的商品共 {total} 个" if total > 0 else f"未找到快查型号包含「{q_text}」的商品",
+            })
+
+        total_results = sum(item["count"] for item in items)
+        return {
+            "total_queries": len(items),
+            "total_results": total_results,
+            "items": items,
+        }
+
     async def _query_by_brand(self, db, brand: str, sort_order=None):
         q = select(Product).where(Product.brand.ilike(f"%{brand}%"))
         q = await self._apply_sort(q, Product, sort_order)
@@ -331,10 +369,16 @@ class QueryEngine:
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)
 
+    async def _query_by_category_level3(self, db, cat: str, sort_order=None):
+        q = select(Product).where(Product.category_level3.ilike(f"%{cat}%"))
+        q = await self._apply_sort(q, Product, sort_order)
+        return await self._execute_and_fetch(db, q)
+
     async def _query_by_category(self, db, cat: str, sort_order=None):
         q = select(Product).where(or_(
             Product.category_level1.ilike(f"%{cat}%"),
             Product.category_level2.ilike(f"%{cat}%"),
+            Product.category_level3.ilike(f"%{cat}%"),
         ))
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)
@@ -477,6 +521,7 @@ class QueryEngine:
             Product.brand.ilike(f"%{keyword}%"),
             Product.category_level1.ilike(f"%{keyword}%"),
             Product.category_level2.ilike(f"%{keyword}%"),
+            Product.category_level3.ilike(f"%{keyword}%"),
             Product.specification.ilike(f"%{keyword}%"),
             Product.barcode_69.ilike(f"%{keyword}%"),
             Product.recommendation.ilike(f"%{keyword}%"),

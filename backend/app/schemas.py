@@ -13,6 +13,7 @@ class ProductCreate(BaseModel):
     brand: str = ""
     category_level1: str = ""
     category_level2: str = ""
+    category_level3: str = ""
     negotiation_price: Optional[float] = Field(default=0, alias="negotiation_price")
     price_update: str = ""
     last_purchase_price: Optional[float] = Field(default=0, alias="last_purchase_price")
@@ -48,6 +49,7 @@ class ProductUpdate(BaseModel):
     brand: Optional[str] = None
     category_level1: Optional[str] = None
     category_level2: Optional[str] = None
+    category_level3: Optional[str] = None
     negotiation_price: Optional[float] = Field(default=None, alias="negotiation_price")
     price_update: Optional[str] = None
     last_purchase_price: Optional[float] = Field(default=None, alias="last_purchase_price")
@@ -66,7 +68,7 @@ class ProductUpdate(BaseModel):
     remark: Optional[str] = None
     shipping_fee: Optional[float] = Field(default=None, alias="shipping_fee")
     barcode_69: Optional[str] = Field(default=None, alias="barcode_69")
-    sales_volume: Optional[int] = None
+    sales_volume: Optional[float] = None
     recommendation: Optional[str] = None
     parameters: Optional[str] = None
     cert_3c: Optional[str] = None
@@ -84,6 +86,7 @@ class ProductResponse(BaseModel):
     brand: Optional[str] = ""
     category_level1: Optional[str] = ""
     category_level2: Optional[str] = ""
+    category_level3: Optional[str] = ""
     negotiation_price: Optional[float] = None
     price_update: Optional[str] = ""
     last_purchase_price: Optional[float] = None
@@ -103,7 +106,7 @@ class ProductResponse(BaseModel):
     remark: Optional[str] = ""
     shipping_fee: Optional[float] = None
     barcode_69: str
-    sales_volume: Optional[int] = 0
+    sales_volume: Optional[float] = 0
     recommendation: Optional[str] = ""
     parameters: Optional[str] = ""
     cert_3c: Optional[str] = ""
@@ -173,12 +176,137 @@ class ParsedQuery(BaseModel):
 
 class SmartQueryResponse(BaseModel):
     query_intent: str
+
+
+# ========== 批量快查型号查询 ==========
+
+class BatchModelQueryRequest(BaseModel):
+    """批量快查型号查询请求"""
+    queries: List[str]
+    fuzzy: bool = True  # 是否模糊匹配
+
+
+class BatchModelQueryItem(BaseModel):
+    query: str
+    results: List[ProductResponse] = []
+    count: int = 0
+    message: str = ""
+
+
+class BatchModelQueryResponse(BaseModel):
+    total_queries: int
+    total_results: int
+    items: List[BatchModelQueryItem]
     parsed_params: dict = {}
     parsed_queries: List[ParsedQuery] = []
     results: List[ProductResponse] = []
     result_count: int = 0
     message: str = ""
     unrecognized_text: str = ""
+
+
+# ========== 平台配置相关 ==========
+
+class PlatformConfigCreate(BaseModel):
+    name: str
+    platform_type: str
+    api_base_url: str = ""
+    api_key: str = ""
+    api_secret: str = ""
+    shop_id: str = ""
+    extra_config: dict = {}
+    is_active: bool = True
+
+
+class PlatformConfigUpdate(BaseModel):
+    name: Optional[str] = None
+    platform_type: Optional[str] = None
+    api_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+    shop_id: Optional[str] = None
+    extra_config: Optional[dict] = None
+    is_active: Optional[bool] = None
+
+
+class PlatformConfigResponse(BaseModel):
+    id: int
+    name: str
+    platform_type: str
+    api_base_url: str
+    api_key: str
+    api_secret: str
+    shop_id: str
+    extra_config: dict = {}
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_datetime(self, v: Optional[datetime]) -> Optional[str]:
+        if v is None:
+            return None
+        return v.isoformat() + 'Z'
+
+
+# ========== 一键上架相关 ==========
+
+class ListingSubmitRequest(BaseModel):
+    product_ids: List[int]
+    platform_ids: List[int]
+
+
+class ListingResultItem(BaseModel):
+    product_id: int
+    platform_id: int
+    status: str
+    platform_product_id: str = ""
+    error_message: str = ""
+
+
+class ListingSubmitResponse(BaseModel):
+    total: int
+    success: int
+    failed: int
+    results: List[ListingResultItem] = []
+
+
+class ListingLogQuery(BaseModel):
+    page: int = 1
+    page_size: int = 20
+    status: Optional[str] = None
+    platform_id: Optional[int] = None
+    product_id: Optional[int] = None
+
+
+class ListingLogResponse(BaseModel):
+    id: int
+    product_id: int
+    product_model: str = ""
+    product_name: str = ""
+    platform_id: int
+    platform_name: str = ""
+    status: str
+    platform_product_id: str = ""
+    error_message: str = ""
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+    @field_serializer("created_at")
+    def serialize_datetime(self, v: Optional[datetime]) -> Optional[str]:
+        if v is None:
+            return None
+        return v.isoformat() + 'Z'
+
+
+class ListingLogDetailResponse(ListingLogResponse):
+    request_data: dict = {}
+    response_data: dict = {}
 
 
 # ========== 通用响应包装 ==========

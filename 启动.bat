@@ -11,19 +11,47 @@ echo.
 
 cd /d "%~dp0backend"
 
-:: 查找 Python
-set PYTHON_CMD=python
-where python >nul 2>nul
-if errorlevel 1 (
-    where py >nul 2>nul
-    if errorlevel 1 (
-        echo [错误] 未找到 Python，请确保已安装 Python 3.9+
-        pause
-        exit /b 1
-    ) else (
-        set PYTHON_CMD=py
+rem 自动检测 Python 解释器路径
+set PYTHON_CMD=
+
+rem 1. 优先使用项目虚拟环境
+if exist "%~dp0.venv\Scripts\python.exe" set PYTHON_CMD=%~dp0.venv\Scripts\python.exe
+if defined PYTHON_CMD echo [检测] 使用虚拟环境: %PYTHON_CMD% & goto :found_python
+
+rem 2. 尝试 PATH 中的 python
+for /f "delims=" %%i in ('where python 2^>nul') do set PYTHON_CMD=%%i
+if defined PYTHON_CMD echo [检测] 使用系统 Python: %PYTHON_CMD% & goto :found_python
+
+rem 3. 尝试 PATH 中的 py (Python Launcher)
+for /f "delims=" %%i in ('where py 2^>nul') do set PYTHON_CMD=%%i
+if defined PYTHON_CMD echo [检测] 使用 Python Launcher: %PYTHON_CMD% & goto :found_python
+
+rem 4. 检查常见安装路径
+if exist "%LOCALAPPDATA%\Programs\Python\" (
+    for /d %%d in ("%LOCALAPPDATA%\Programs\Python\Python*") do (
+        if exist "%%d\python.exe" set PYTHON_CMD=%%d\python.exe
     )
 )
+if defined PYTHON_CMD echo [检测] 使用: %PYTHON_CMD% & goto :found_python
+
+for %%d in (C:\Python313 C:\Python312 C:\Python311 C:\Python310 C:\Python39) do (
+    if exist "%%d\python.exe" set PYTHON_CMD=%%d\python.exe
+)
+if defined PYTHON_CMD echo [检测] 使用: %PYTHON_CMD% & goto :found_python
+
+rem 5. 均未找到，报错
+echo [错误] 未找到 Python，请确保已安装 Python 3.9+
+echo.
+echo 已尝试以下方式：
+echo   - 项目虚拟环境 .venv\Scripts\python.exe
+echo   - PATH 环境变量中的 python/py
+echo   - %%LOCALAPPDATA%%\Programs\Python\Python*
+echo   - 常见安装目录 C:\Python39~C:\Python313
+pause
+exit /b 1
+
+:found_python
+echo [检测] Python路径: %PYTHON_CMD%
 
 :: 启动后端
 start "智能报价-后端" cmd /c "cd /d "%~dp0backend" && set PYTHONPATH=%~dp0backend && %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"

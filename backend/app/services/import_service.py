@@ -1,4 +1,5 @@
 """数据导入业务逻辑"""
+from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import traceback
@@ -21,6 +22,7 @@ COLUMN_ALIAS_MAP: Dict[str, List[str]] = {
     "brand": ["品牌", "商标", "brand", "trademark", "品牌名", "品牌名称", "牌子"],
     "category_level1": ["一级品类", "大类", "一级分类", "品类一", "cat1", "category1", "category_level1", "主分类", "一级类别"],
     "category_level2": ["二级品类", "小类", "二级分类", "品类二", "cat2", "category2", "category_level2", "子分类", "二级类别"],
+    "category_level3": ["三级品类", "三级分类", "品类三", "cat3", "category3", "category_level3", "三级类别", "细分类"],
     "negotiation_price": ["备货商谈价", "商谈价", "备货价", "谈判价", "negotiation_price", "商议价", "协商价", "备货商谈价格"],
     "price_update": ["报价更新", "更新", "价格更新", "最新报价", "price_update", "报价变动", "价格变动"],
     "last_purchase_price": ["上次进货价", "上次进价", "上期进货价", "上回进货价", "last_purchase_price", "上回进价", "上次采购价"],
@@ -208,7 +210,8 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
     success_rows = 0
     skip_rows = 0
     error_rows = 0
-    errors = []
+    import_errors = []  # 真实错误（数据校验/异常）
+    skip_details = []   # 跳过/覆盖记录
 
     with sync_engine.connect() as conn:
         for idx, row in df.iterrows():
@@ -219,33 +222,28 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                 quick_model = str(row_data.get("quick_model") or "").strip()
                 if not quick_model:
                     error_rows += 1
-                    errors.append({"row": int(idx) + 2, "reason": "快查型号为空"})
+                    import_errors.append({"row": int(idx) + 2, "reason": "快查型号为空"})
                     continue
+                # 用去除首尾空格的快查型号覆盖原值，避免查找和写入不一致导致 UNIQUE 冲突
+                row_data["quick_model"] = quick_model
 
-                # 确保型号有效（必填项）
-                product_model = str(row_data.get("product_model") or "").strip()
-                if not product_model:
-                    error_rows += 1
-                    errors.append({"row": int(idx) + 2, "reason": "型号为空"})
-                    continue
-
-                # 69码若为空则填空白字符串（数据库 non-nullable）
-                if row_data.get("barcode_69") is None:
-                    row_data["barcode_69"] = ""
-
-                # 其他字符字段若为 None 则转空白字符串，避免 NULL 冲突
-                string_fields = ["product_name", "price_update", "shop_url", "box_spec",
-                                 "cooperation_level", "supply_status", "specification",
+                # 字符字段统一去除首尾空格，None/NaN 转空白字符串
+                string_fields = ["product_model", "barcode_69", "product_name", "price_update", "shop_url",
+                                 "box_spec", "cooperation_level", "supply_status", "specification",
                                  "remark", "recommendation", "parameters", "cert_3c", "image"]
                 for sf in string_fields:
-                    if sf in row_data and row_data[sf] is None:
-                        row_data[sf] = ""
+                    if sf in row_data:
+                        val = row_data[sf]
+                        if val is None or pd.isna(val):
+                            row_data[sf] = ""
+                        else:
+                            row_data[sf] = str(val).strip()
 
                 # 确保型号有效（必填项）
-                product_model = str(row_data.get("product_model") or "").strip()
+                product_model = row_data.get("product_model", "")
                 if not product_model:
                     error_rows += 1
-                    errors.append({"row": int(idx) + 2, "reason": "型号为空"})
+                    import_errors.append({"row": int(idx) + 2, "reason": "型号为空"})
                     continue
 
                 # 确保代发价(price)有效（必填项）
@@ -255,58 +253,75 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                     price_val = 0
                 if price_val <= 0:
                     error_rows += 1
-                    errors.append({"row": int(idx) + 2, "reason": "代发价为空或无效"})
+                    import_errors.append({"row": int(idx) + 2, "reason": "代发价为空或无效"})
                     continue
                 row_data["price"] = price_val
 
-                # 去重检查（以快查型号为准）
+                # 去重检查：快查型号、产品名称、一级品类、二级品类、三级品类、品牌全部相同才算重复
+                dup_fields = {
+                    "quick_model": quick_model,
+                    "product_name": row_data.get("product_name", ""),
+                    "category_level1": row_data.get("category_level1", ""),
+                    "category_level2": row_data.get("category_level2", ""),
+                    "category_level3": row_data.get("category_level3", ""),
+                    "brand": row_data.get("brand", ""),
+                }
+                dup_where = " AND ".join([f"{k}=:{k}" for k in dup_fields])
                 existing = conn.execute(
-                    text("SELECT id FROM products WHERE quick_model = :qm"),
-                    {"qm": quick_model}
+                    text(f"SELECT id FROM products WHERE {dup_where}"),
+                    dup_fields
                 ).fetchone()
 
                 if existing:
                     if duplicate_strategy == "skip":
                         skip_rows += 1
-                        errors.append({"row": int(idx) + 2, "reason": f"快查型号「{quick_model}」已存在，已跳过"})
+                        skip_details.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}），已跳过"})
                         continue
                     elif duplicate_strategy == "overwrite":
                         set_clause = ", ".join([f"{f}=:{f}" for f in existing_fields if f != "id"])
+                        now_beijing = datetime.now(timezone(timedelta(hours=8))).isoformat()
                         conn.execute(
                             text(f"""UPDATE products SET {set_clause},
-                                    updated_at=CURRENT_TIMESTAMP WHERE id=:id"""),
-                            {**row_data, "id": existing[0]}
+                                    updated_at=:updated_at WHERE id=:id"""),
+                            {**row_data, "updated_at": now_beijing, "id": existing[0]}
                         )
                         success_rows += 1
-                        errors.append({"row": int(idx) + 2, "reason": f"快查型号「{quick_model}」已存在，已覆盖更新"})
+                        skip_details.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}），已覆盖更新"})
                         continue
                     elif duplicate_strategy == "error":
                         error_rows += 1
-                        errors.append({"row": int(idx) + 2, "reason": f"快查型号「{quick_model}」已存在"})
+                        import_errors.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}）"})
                         continue
 
                 # 插入新记录
-                placeholders = ", ".join([f":{f}" for f in existing_fields])
+                now_beijing = datetime.now(timezone(timedelta(hours=8))).isoformat()
+                insert_fields = existing_fields + ["created_at", "updated_at"]
+                insert_placeholders = ", ".join([f":{f}" for f in insert_fields])
+                row_data["created_at"] = now_beijing
+                row_data["updated_at"] = now_beijing
                 conn.execute(
-                    text(f"INSERT INTO products ({', '.join(existing_fields)}) VALUES ({placeholders})"),
+                    text(f"INSERT INTO products ({', '.join(insert_fields)}) VALUES ({insert_placeholders})"),
                     row_data
                 )
                 success_rows += 1
 
             except Exception as e:
                 error_rows += 1
-                errors.append({"row": int(idx) + 2, "reason": str(e)})
+                import_errors.append({"row": int(idx) + 2, "reason": str(e)})
 
         conn.commit()
 
     # 清理缓存
     del _upload_cache[file_id]
 
+    # 真实错误排前面，跳过记录排后面，总上限 200 条
+    errors = (import_errors + skip_details)[:200]
+
     return {
         "total_rows": total_rows,
         "success_rows": success_rows,
         "skip_rows": skip_rows,
         "error_rows": error_rows,
-        "errors": errors[:50],
+        "errors": errors,
     }
 

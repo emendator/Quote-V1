@@ -25,6 +25,7 @@ SYSTEM_PROMPT = """你是一个智能报价系统的查询助手。用户的商�
 - brand (品牌 / 品牌名 / 牌子)
 - category_level1 (一级品类 / 大类 / 一级分类)
 - category_level2 (二级品类 / 小类 / 二级分类)
+- category_level3 (三级品类 / 三级分类 / 细分类)
 - negotiation_price (备货商谈价 / 商谈价 / 备货价) — 数值
 - price_update (报价更新 / 价格更新)
 - last_purchase_price (上次进货价 / 上次进价) — 数值
@@ -49,7 +50,7 @@ SYSTEM_PROMPT = """你是一个智能报价系统的查询助手。用户的商�
 - parameters (参数 / 商品参数)
 - cert_3c (3C / 3C认证 / CCC)
 
-注意语义匹配：快查型号=quick_model, 进价/成本价=purchase_price, 品类/分类=category_level1+category_level2, 链接=shop_url, 活动价=new_event_price, 集采价=group_purchase_price, 运费=shipping_fee
+注意语义匹配：快查型号=quick_model, 进价/成本价=purchase_price, 品类/分类=category_level1+category_level2+category_level3, 链接=shop_url, 活动价=new_event_price, 集采价=group_purchase_price, 运费=shipping_fee
 
 请从用户的查询中提取结构化的查询条件，以 JSON 格式返回。
 返回格式必须严格遵循以下模式之一或组合：
@@ -70,7 +71,7 @@ SYSTEM_PROMPT = """你是一个智能报价系统的查询助手。用户的商�
 - sort_by 可选值: price(代发价), purchase_price(进货价), retail_price(零售价), discount_rate(折扣率), bid_price(投标价), group_purchase_price(集采价), new_event_price(新活动价), negotiation_price(备货商谈价), shipping_fee(代发运费), gross_weight(毛重), sales_volume(销量)
 - 用户没有明确指定排序字段时，默认 sort_by 为 "price"
 - 多条件用 combined 类型
-- 品类/分类等通用词应同时搜索 category_level1 和 category_level2
+- 品类/分类等通用词应同时搜索 category_level1 和 category_level2 和 category_level3
 - 只返回 JSON，不要额外解释
 - 无法识别时返回 {"type": "unknown", "original_text": "用户输入"}
 
@@ -261,6 +262,8 @@ class AIQueryService:
                     cond_desc.append(f"一级品类={v}")
                 elif t == "category_level2_search":
                     cond_desc.append(f"二级品类={v}")
+                elif t == "category_level3_search":
+                    cond_desc.append(f"三级品类={v}")
                 elif t == "model_search":
                     cond_desc.append(f"型号={v}")
                 elif t == "product_name_search":
@@ -390,7 +393,9 @@ class AIQueryService:
             elif qtype == "price_update_search":
                 items, total = await query_engine._query_by_price_update(db, condition["value"], sort_order)
                 return {"results": [p.to_dict() for p in items], "count": total}
-
+            elif qtype == "category_level3_search":
+                items, total = await query_engine._query_by_category_level3(db, condition["value"], sort_order)
+                return {"results": [p.to_dict() for p in items], "count": total}
             elif qtype == "spec_keyword":
                 items, total = await query_engine._query_by_spec(db, condition["value"], sort_order)
                 return {"results": [p.to_dict() for p in items], "count": total}

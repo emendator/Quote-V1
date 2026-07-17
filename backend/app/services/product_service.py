@@ -129,7 +129,7 @@ async def export_products(
     headers = [
         ("序号", 6), ("快查型号", 18), ("型号", 18),
         ("产品名称", 20), ("品牌", 14), ("一级品类", 14),
-        ("二级品类", 14), ("备货商谈价(元)", 14), ("报价更新", 14),
+        ("二级品类", 14), ("三级品类", 14), ("备货商谈价(元)", 14), ("报价更新", 14),
         ("上次进货价(元)", 14), ("进货价(元)", 12), ("零售价(元)", 12),
         ("折扣率(%)", 10), ("新活动价(元)", 14), ("链接", 30), ("投标价(元)", 12),
         ("集采价/项目(元)", 14), ("代发价(元)", 12), ("毛重(kg)", 10),
@@ -152,7 +152,7 @@ async def export_products(
         values = [
             item.id, item.quick_model, item.product_model,
             item.product_name, item.brand, item.category_level1,
-            item.category_level2, item.negotiation_price or 0, item.price_update,
+            item.category_level2, item.category_level3, item.negotiation_price or 0, item.price_update,
             item.last_purchase_price or 0, item.purchase_price or 0, item.retail_price or 0,
             item.discount_rate, item.new_event_price or 0, item.shop_url, item.bid_price or 0,
             item.group_purchase_price or 0, item.price, item.gross_weight or 0,
@@ -244,4 +244,10 @@ async def get_all_brands(db: AsyncSession) -> List[str]:
 async def get_all_category_level2(db: AsyncSession) -> List[str]:
     """获取所有二级品类"""
     result = await db.execute(select(Product.category_level2).distinct().where(Product.category_level2 != ""))
+    return [row[0] for row in result.all()]
+
+
+async def get_all_category_level3(db: AsyncSession) -> List[str]:
+    """获取所有三级品类"""
+    result = await db.execute(select(Product.category_level3).distinct().where(Product.category_level3 != ""))
     return [row[0] for row in result.all()]

@@ -73,6 +73,9 @@ export default function ProductForm({ open, editingProduct, onClose, onSuccess }
                 <Form.Item name="category_level2" label="二级品类">
                     <Input placeholder="二级品类" />
                 </Form.Item>
+                <Form.Item name="category_level3" label="三级品类">
+                    <Input placeholder="三级品类" />
+                </Form.Item>
                 <Form.Item name="negotiation_price" label="备货商谈价(元)">
                     <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
                 </Form.Item>

@@ -8,6 +8,7 @@ const DB_FIELDS = [
     { value: 'brand', label: '品牌' },
     { value: 'category_level1', label: '一级品类' },
     { value: 'category_level2', label: '二级品类' },
+    { value: 'category_level3', label: '三级品类' },
     { value: 'negotiation_price', label: '备货商谈价(元)' },
     { value: 'price_update', label: '报价更新' },
     { value: 'last_purchase_price', label: '上次进货价(元)' },

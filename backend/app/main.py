@@ -9,7 +9,7 @@ from pathlib import Path
 
 from app.config import CORS_ORIGINS, HOST, PORT
 from app.database import init_db
-from app.routers import products, import_data, query
+from app.routers import products, import_data, query, platforms
 from app.services.cleanup_service import clean_all, FILE_MAX_AGE_HOURS, CLEANUP_INTERVAL_HOURS
 
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +67,7 @@ app.add_middleware(
 app.include_router(products.router)
 app.include_router(import_data.router)
 app.include_router(query.router)
+app.include_router(platforms.router)
 
 
 # 健康检查

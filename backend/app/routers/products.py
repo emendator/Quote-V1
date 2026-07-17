@@ -82,6 +82,13 @@ async def list_category_level2(db: AsyncSession = Depends(get_db)):
     return ApiResponse(data=cats)
 
 
+@router.get("/categories/level3", response_model=ApiResponse)
+async def list_category_level3(db: AsyncSession = Depends(get_db)):
+    """获取所有三级品类"""
+    cats = await product_service.get_all_category_level3(db)
+    return ApiResponse(data=cats)
+
+
 @router.get("/{product_id}", response_model=ApiResponse)
 async def get_product(product_id: int, db: AsyncSession = Depends(get_db)):
     """商品详情"""

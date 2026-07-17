@@ -3,6 +3,8 @@ import { Layout, Menu, Typography } from 'antd';
 import {
     SearchOutlined,
     DatabaseOutlined,
+    CloudServerOutlined,
+    FileTextOutlined,
 } from '@ant-design/icons';
 
 const { Header, Sider, Content } = Layout;
@@ -11,6 +13,8 @@ const { Title } = Typography;
 const menuItems = [
     { key: '/', icon: <SearchOutlined />, label: '智能查询' },
     { key: '/data', icon: <DatabaseOutlined />, label: '数据管理' },
+    { key: '/platforms', icon: <CloudServerOutlined />, label: '平台管理' },
+    { key: '/listing-logs', icon: <FileTextOutlined />, label: '上架日志' },
 ];
 
 export default function AppLayout() {
@@ -41,7 +45,10 @@ export default function AppLayout() {
             <Layout>
                 <Header style={{ background: '#fff', padding: '0 24px', borderBottom: '1px solid #f0f0f0' }}>
                     <Title level={4} style={{ margin: '16px 0', lineHeight: '32px' }}>
-                        {location.pathname === '/' ? '🔍 智能报价查询' : '📋 商品数据管理'}
+                        {location.pathname === '/' && '🔍 智能报价查询'}
+                        {location.pathname === '/data' && '📋 商品数据管理'}
+                        {location.pathname === '/platforms' && '☁️ 平台配置管理'}
+                        {location.pathname === '/listing-logs' && '📄 上架日志'}
                     </Title>
                 </Header>
                 <Content style={{ padding: 24, overflow: 'auto' }}>
