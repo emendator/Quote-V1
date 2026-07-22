@@ -10,13 +10,77 @@ def beijing_now():
     return datetime.now(timezone(timedelta(hours=8)))
 
 
+class User(Base):
+    """用户表"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="用户ID")
+    username = Column(String(50), unique=True, nullable=False, index=True, comment="用户名")
+    password_hash = Column(String(256), nullable=False, comment="密码哈希(bcrypt)")
+    email = Column(String(200), nullable=False, comment="邮箱")
+    role = Column(String(20), nullable=False, default="user", comment="角色: super_admin/admin/user")
+    company_name = Column(String(200), default="", comment="公司名称")
+    contact_person = Column(String(100), default="", comment="联系人")
+    contact_phone = Column(String(50), default="", comment="联系电话")
+    company_address = Column(String(500), default="", comment="公司地址")
+    is_active = Column(Integer, default=1, comment="是否启用(1是/0否)")
+    last_login_at = Column(DateTime, nullable=True, default=None, comment="最后登录时间")
+    created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
+    updated_at = Column(DateTime, default=beijing_now, onupdate=beijing_now, comment="更新时间(北京时间)")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "username": self.username,
+            "email": self.email,
+            "role": self.role,
+            "company_name": self.company_name or "",
+            "contact_person": self.contact_person or "",
+            "contact_phone": self.contact_phone or "",
+            "company_address": self.company_address or "",
+            "is_active": bool(self.is_active),
+            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class InviteCode(Base):
+    """邀请码表"""
+    __tablename__ = "invite_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
+    code = Column(String(50), unique=True, nullable=False, index=True, comment="邀请码")
+    type = Column(String(20), nullable=False, comment="类型: admin/user")
+    created_by = Column(Integer, nullable=False, comment="创建者用户ID")
+    used_by = Column(Integer, nullable=True, default=None, comment="使用者用户ID")
+    used_at = Column(DateTime, nullable=True, default=None, comment="使用时间")
+    expires_at = Column(DateTime, nullable=False, comment="过期时间")
+    is_used = Column(Integer, default=0, comment="是否已使用(0否/1是)")
+    created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "code": self.code,
+            "type": self.type,
+            "created_by": self.created_by,
+            "used_by": self.used_by,
+            "used_at": self.used_at.isoformat() if self.used_at else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "is_used": bool(self.is_used),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Product(Base):
     """商品主表"""
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
+    owner_id = Column(Integer, nullable=False, default=0, index=True, comment="所属用户ID(数据隔离)")
     quick_model = Column(String(500), nullable=False, default="", index=True, comment="快查型号(必填)")
-    product_model = Column(String(500), nullable=False, default="", index=True, comment="型号(必填)")
+    product_model = Column(String(500), nullable=True, default="", index=True, comment="型号")
     product_name = Column(String(500), default="", comment="产品名称")
     brand = Column(String(200), default="", index=True, comment="品牌")
     category_level1 = Column(String(200), default="", index=True, comment="一级品类")
@@ -29,9 +93,9 @@ class Product(Base):
     retail_price = Column(Float, nullable=True, default=0, comment="零售价(元)")
     @property
     def discount_rate(self) -> float:
-        """折扣率 = 代发价 / 零售价 × 100% (自动计算)"""
-        if self.retail_price and self.retail_price > 0:
-            return round(self.price / self.retail_price * 100, 2)
+        """折扣率 = 集采价 / 新活动价 × 100% (自动计算)"""
+        if self.new_event_price and self.new_event_price > 0:
+            return round(self.group_purchase_price / self.new_event_price * 100, 2) if self.group_purchase_price else 0.0
         return 0.0
     new_event_price = Column(Float, nullable=True, default=0, comment="新活动价(元)")
     shop_url = Column(String(500), default="", comment="链接")
@@ -45,7 +109,7 @@ class Product(Base):
     specification = Column(String(500), default="", index=True, comment="规格")
     remark = Column(Text, default="", comment="备注")
     shipping_fee = Column(Float, nullable=True, default=0, comment="代发运费(元)")
-    barcode_69 = Column(String(20), nullable=False, default="", index=True, comment="69码")
+    barcode_69 = Column(String(20), nullable=True, default="", index=True, comment="69码")
     sales_volume = Column(Integer, default=0, comment="销量")
     recommendation = Column(Text, default="", comment="推荐理由")
     parameters = Column(Text, default="", comment="参数")
@@ -57,6 +121,7 @@ class Product(Base):
     def to_dict(self):
         return {
             "id": self.id,
+            "owner_id": self.owner_id,
             "quick_model": self.quick_model,
             "product_model": self.product_model,
             "product_name": self.product_name,
@@ -178,4 +243,68 @@ class ListingLog(Base):
             "platform_product_id": self.platform_product_id,
             "error_message": self.error_message,
             "created_at": (self.created_at.isoformat() + 'Z') if self.created_at else None,
+        }
+
+
+class SolutionPlan(Base):
+    """智能方案主表"""
+    __tablename__ = "solution_plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
+    owner_id = Column(Integer, nullable=False, default=0, index=True, comment="所属用户ID")
+    name = Column(String(200), default="", comment="方案名称")
+    requirement = Column(Text, default="", comment="客户原始需求文本")
+    ai_enabled = Column(Integer, default=0, comment="是否使用 AI 分析(1是/0否)")
+    total_amount = Column(Float, nullable=True, default=0, comment="方案总金额(元)")
+    status = Column(String(20), default="draft", comment="状态: draft/finalized")
+    remark = Column(Text, default="", comment="备注")
+    created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
+    updated_at = Column(DateTime, default=beijing_now, onupdate=beijing_now, comment="更新时间(北京时间)")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "requirement": self.requirement,
+            "ai_enabled": bool(self.ai_enabled),
+            "total_amount": self.total_amount,
+            "status": self.status,
+            "remark": self.remark,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SolutionItem(Base):
+    """方案明细表"""
+    __tablename__ = "solution_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
+    plan_id = Column(Integer, nullable=False, index=True, comment="方案ID")
+    product_id = Column(Integer, nullable=False, comment="商品ID")
+    quick_model = Column(String(500), default="", comment="快查型号(冗余)")
+    product_model = Column(String(500), default="", comment="商品型号(冗余)")
+    product_name = Column(String(500), default="", comment="商品名称(冗余)")
+    brand = Column(String(200), default="", comment="品牌(冗余)")
+    specification = Column(String(500), default="", comment="规格(冗余)")
+    price = Column(Float, default=0, comment="代发价(冗余)")
+    quantity = Column(Integer, default=1, comment="数量")
+    subtotal = Column(Float, nullable=True, default=0, comment="小计 = price × quantity")
+    remark = Column(Text, default="", comment="行备注")
+    created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "plan_id": self.plan_id,
+            "product_id": self.product_id,
+            "quick_model": self.quick_model,
+            "product_model": self.product_model,
+            "product_name": self.product_name,
+            "brand": self.brand,
+            "specification": self.specification,
+            "price": self.price,
+            "quantity": self.quantity,
+            "subtotal": self.subtotal,
+            "remark": self.remark,
         }

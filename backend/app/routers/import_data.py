@@ -4,17 +4,24 @@ import shutil
 import uuid
 import traceback
 import logging
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import UPLOAD_DIR, ALLOWED_EXTENSIONS
+from app.database import get_db
 from app.schemas import ApiResponse, UploadResponse, ConfirmImportRequest, ImportResultResponse
 from app.services.import_service import handle_upload, execute_import
+from app.models import User
+from app.utils.auth_utils import get_current_user
 
 router = APIRouter(prefix="/api/import", tags=["数据导入"])
 logger = logging.getLogger("import_api")
 
 
 @router.post("/upload", response_model=ApiResponse)
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
     """上传 Excel/CSV 文件并返回预览数据"""
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -35,10 +42,13 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @router.post("/confirm", response_model=ApiResponse)
-async def confirm_import(data: ConfirmImportRequest):
-    """确认列映射并执行导入"""
+async def confirm_import(
+    data: ConfirmImportRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """确认列映射并执行导入（数据绑定到当前用户）"""
     try:
-        result = execute_import(data.file_id, data.column_mapping, data.duplicate_strategy)
+        result = execute_import(data.file_id, data.column_mapping, data.duplicate_strategy, owner_id=current_user.id)
         return ApiResponse(data=result, message="导入完成")
     except ValueError as e:
         logger.warning(f"导入参数错误: {e}")

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from app.config import CORS_ORIGINS, HOST, PORT
 from app.database import init_db
-from app.routers import products, import_data, query, platforms
+from app.routers import products, import_data, query, platforms, solutions, auth, invites
 from app.services.cleanup_service import clean_all, FILE_MAX_AGE_HOURS, CLEANUP_INTERVAL_HOURS
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +68,9 @@ app.include_router(products.router)
 app.include_router(import_data.router)
 app.include_router(query.router)
 app.include_router(platforms.router)
+app.include_router(solutions.router)
+app.include_router(auth.router)
+app.include_router(invites.router)
 
 
 # 健康检查
@@ -96,4 +99,6 @@ if frontend_dist.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=True)
+    # reload=True 会启用文件监听器，在 Windows 上长时间运行可能不稳定
+    # 开发时如需热重载可临时改为 reload=True，但生产/正式使用建议设为 False
+    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=False)

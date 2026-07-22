@@ -2,9 +2,39 @@ import { Table, Card, Tag, Empty, Typography, Space, Button, Alert, Tooltip } fr
 import { DownOutlined, RightOutlined, OrderedListOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Product, ParsedQuery, SmartQueryResult, BatchModelQueryResult, BatchModelQueryItem } from '../types';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 const { Text, Title } = Typography;
+
+// ========== 方案购物车（localStorage 持久化） ==========
+const SOLUTION_CART_KEY = 'solution_cart';
+
+function getSolutionCart(): Map<number, number> {
+    try {
+        const raw = localStorage.getItem(SOLUTION_CART_KEY);
+        if (!raw) return new Map();
+        const arr = JSON.parse(raw);
+        return new Map(arr);
+    } catch { return new Map(); }
+}
+
+function saveSolutionCart(cart: Map<number, number>) {
+    localStorage.setItem(SOLUTION_CART_KEY, JSON.stringify([...cart.entries()]));
+}
+
+function toggleSolutionCart(product: Product) {
+    const cart = getSolutionCart();
+    if (cart.has(product.id)) {
+        cart.delete(product.id);
+    } else {
+        cart.set(product.id, 1);
+    }
+    saveSolutionCart(cart);
+    // 强制重新渲染当前组件
+    const evt = new CustomEvent('solutionCartChange', { detail: cart.size });
+    window.dispatchEvent(evt);
+}
+// ================================================
 
 // 长文本渲染：省略号 + 悬停 Tooltip 查看完整内容
 const renderEllipsis = (text: string) => {
@@ -18,35 +48,83 @@ const renderEllipsis = (text: string) => {
     );
 };
 
+// 时间格式：去掉时分秒，仅保留日期
+const fmtDate = (v: string | null | undefined) => {
+    if (!v) return '-';
+    const m = v.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : v;
+};
+
+// 图片渲染：Base64 缩略图，点击放大
+const renderImage = (v: string | null | undefined) => {
+    if (!v || v === '') return '-';
+    const src = v.startsWith('data:') ? v : `data:image/png;base64,${v}`;
+    return (
+        <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
+            <img src={src} style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }} alt="缩略图" />
+        </Tooltip>
+    );
+};
+
+// 数值排序：null/undefined 排到最后，有效值按数字大小
+const numSort = (a: number | null | undefined, b: number | null | undefined): number => {
+    if (a == null && b == null) return 0;
+    if (a == null) return 1;
+    if (b == null) return -1;
+    return Number(a) - Number(b);
+};
+
+// 日期排序：空值排到最后，有效值按时间先后
+const dateSort = (a: string | null | undefined, b: string | null | undefined): number => {
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    return new Date(a).getTime() - new Date(b).getTime();
+};
+
 // 批量查询专用精简列：聚焦代发价等关键报价信息
 const batchColumns: ColumnsType<Product> = [
-    { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 160, ellipsis: true, render: (v) => <Text strong>{v || '-'}</Text> },
-    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 150, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '品牌', dataIndex: 'brand', key: 'brand', width: 80, render: (v) => v || '-' },
-    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 130, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '代发价', dataIndex: 'price', key: 'price', width: 90, render: (v) => (v ? <span className="price-highlight" style={{ fontWeight: 'bold', fontSize: 15 }}>¥{v.toFixed(2)}</span> : '-') },
-    { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 85, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 85, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 75, render: (v) => (v ? `${v}%` : '-') },
-    { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 75, render: (v) => v || '-' },
-    { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 140, render: (v) => v || '-' },
+    { title: '图片', dataIndex: 'image', key: 'image', width: 55, render: (v) => renderImage(v) },
+    { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: true, render: (v) => <Text strong>{v || '-'}</Text> },
+    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '品牌', dataIndex: 'brand', key: 'brand', width: 55, render: (v) => v || '-' },
+    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 95, sorter: (a, b) => dateSort(a.price_update, b.price_update), render: (v) => fmtDate(v) },
+    { title: '代发价', dataIndex: 'price', key: 'price', width: 85, sorter: (a, b) => numSort(a.price, b.price), render: (v) => (v !== null && v !== undefined && v !== '' ? <span className="price-highlight" style={{ fontWeight: 'bold', fontSize: 15 }}>¥{Number(v).toFixed(2)}</span> : '-') },
+    { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 80, sorter: (a, b) => numSort(a.purchase_price, b.purchase_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 80, sorter: (a, b) => numSort(a.retail_price, b.retail_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 75, sorter: (a, b) => numSort(a.new_event_price, b.new_event_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '集采价', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 75, sorter: (a, b) => numSort(a.group_purchase_price, b.group_purchase_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 70, sorter: (a, b) => numSort(a.discount_rate, b.discount_rate), render: (v) => (v ? `${v}%` : '-') },
+    { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 70, render: (v) => v || '-' },
+    { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 130, render: (v) => v || '-' },
+    {
+        title: '方案', key: 'solution', width: 60, fixed: 'right',
+        render: (_: unknown, record: Product) => {
+            const isInCart = getSolutionCart().has(record.id);
+            return <Button size="small" type={isInCart ? 'primary' : 'default'} onClick={() => toggleSolutionCart(record)}>{isInCart ? '已加' : '加入'}</Button>;
+        },
+    },
 ];
 
 const columns: ColumnsType<Product> = [
-    { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 140, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 130, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '品牌', dataIndex: 'brand', key: 'brand', width: 65, render: (v) => v || '-' },
+    { title: '图片', dataIndex: 'image', key: 'image', width: 55, render: (v) => renderImage(v) },
+    { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 115, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 125, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '品牌', dataIndex: 'brand', key: 'brand', width: 55, render: (v) => v || '-' },
     { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 75, render: (v) => v || '-' },
     { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 75, render: (v) => v || '-' },
     { title: '三级品类', dataIndex: 'category_level3', key: 'category_level3', width: 75, render: (v) => v || '-' },
-    { title: '备货商谈价', dataIndex: 'negotiation_price', key: 'negotiation_price', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '代发价', dataIndex: 'price', key: 'price', width: 75, render: (v) => (v ? <span className="price-highlight">¥{v.toFixed(2)}</span> : '-') },
-    { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 65, render: (v) => (v ? `${v}%` : '-') },
-    { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-    { title: '集采价', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 95, sorter: (a, b) => dateSort(a.price_update, b.price_update), render: (v) => fmtDate(v) },
+    { title: '备货商谈价', dataIndex: 'negotiation_price', key: 'negotiation_price', width: 75, sorter: (a, b) => numSort(a.negotiation_price, b.negotiation_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '代发价', dataIndex: 'price', key: 'price', width: 75, sorter: (a, b) => numSort(a.price, b.price), render: (v) => (v !== null && v !== undefined && v !== '' ? <span className="price-highlight">¥{Number(v).toFixed(2)}</span> : '-') },
+    { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 75, sorter: (a, b) => numSort(a.purchase_price, b.purchase_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 75, sorter: (a, b) => numSort(a.retail_price, b.retail_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 75, sorter: (a, b) => numSort(a.new_event_price, b.new_event_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '集采价', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 75, sorter: (a, b) => numSort(a.group_purchase_price, b.group_purchase_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 75, sorter: (a, b) => numSort(a.bid_price, b.bid_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+    { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 65, sorter: (a, b) => numSort(a.discount_rate, b.discount_rate), render: (v) => (v ? `${v}%` : '-') },
     { title: '链接', dataIndex: 'shop_url', key: 'shop_url', width: 150, ellipsis: true, render: (v) => renderEllipsis(v) },
     { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 140, render: (v) => v || '-' },
     { title: '规格', dataIndex: 'specification', key: 'specification', width: 110, ellipsis: true, render: (v) => renderEllipsis(v) },
@@ -60,14 +138,47 @@ const columns: ColumnsType<Product> = [
     { title: '参数', dataIndex: 'parameters', key: 'parameters', width: 100, ellipsis: true, render: (v) => renderEllipsis(v) },
     { title: '3C', dataIndex: 'cert_3c', key: 'cert_3c', width: 65, render: (v) => v || '-' },
     { title: '备注', dataIndex: 'remark', key: 'remark', width: 140, ellipsis: true, render: (v) => renderEllipsis(v) },
+    {
+        title: '方案', key: 'solution', width: 70, fixed: 'right',
+        render: (_: unknown, record: Product) => {
+            const isInCart = getSolutionCart().has(record.id);
+            return (
+                <Button
+                    size="small"
+                    type={isInCart ? 'primary' : 'default'}
+                    onClick={() => toggleSolutionCart(record)}
+                >
+                    {isInCart ? '已加' : '加入'}
+                </Button>
+            );
+        },
+    },
 ];
 
 interface Props {
     result: SmartQueryResult | BatchModelQueryResult | null;
     batchMode?: boolean;
+    selectedRowKeys?: number[];
+    onSelectionChange?: (keys: number[]) => void;
 }
 
-export default function QueryResult({ result, batchMode }: Props) {
+export default function QueryResult({ result, batchMode, selectedRowKeys, onSelectionChange }: Props) {
+    // 方案购物车版本号——每次加入/移除时 +1，强制重渲染让按钮状态更新
+    const [, setCartVersion] = useState(0);
+
+    useEffect(() => {
+        const handler = () => setCartVersion(v => v + 1);
+        window.addEventListener('solutionCartChange', handler);
+        return () => window.removeEventListener('solutionCartChange', handler);
+    }, []);
+
+    // 行选择配置（导出使用）
+    const rowSelection = selectedRowKeys !== undefined && onSelectionChange ? {
+        selectedRowKeys,
+        onChange: (keys: React.Key[]) => onSelectionChange(keys as number[]),
+        preserveSelectedRowKeys: true,
+    } : undefined;
+
     // 默认全部展开，点击收起
     const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
 
@@ -143,6 +254,7 @@ export default function QueryResult({ result, batchMode }: Props) {
                                         size="small"
                                         pagination={false}
                                         scroll={{ x: 1100 }}
+                                        rowSelection={rowSelection}
                                     />
                                 ) : (
                                     <Empty description={item.message} image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -215,6 +327,7 @@ export default function QueryResult({ result, batchMode }: Props) {
                                 showTotal: (t: number) => `共 ${t} 条`,
                             }}
                             scroll={{ x: 2400 }}
+                            rowSelection={rowSelection}
                         />
                     ) : (
                         <Empty description="未找到同时满足所有条件的商品" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -266,6 +379,7 @@ export default function QueryResult({ result, batchMode }: Props) {
                                     size="small"
                                     pagination={false}
                                     scroll={{ x: 2400 }}
+                                    rowSelection={rowSelection}
                                 />
                             ) : (
                                 <Empty description={pq.message} image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -304,6 +418,7 @@ export default function QueryResult({ result, batchMode }: Props) {
                             showTotal: (t) => `共 ${t} 条`,
                         }}
                         scroll={{ x: 2400 }}
+                        rowSelection={rowSelection}
                     />
                 ) : (
                     <Empty description="未找到匹配的商品" image={Empty.PRESENTED_IMAGE_SIMPLE} />

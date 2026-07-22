@@ -3,7 +3,7 @@ import { Table, Select } from 'antd';
 const DB_FIELDS = [
     { value: '', label: '— 不导入 —' },
     { value: 'quick_model', label: '快查型号 *' },
-    { value: 'product_model', label: '型号 *' },
+    { value: 'product_model', label: '型号' },
     { value: 'product_name', label: '产品名称' },
     { value: 'brand', label: '品牌' },
     { value: 'category_level1', label: '一级品类' },
@@ -19,7 +19,7 @@ const DB_FIELDS = [
     { value: 'shop_url', label: '链接' },
     { value: 'bid_price', label: '投标价(元)' },
     { value: 'group_purchase_price', label: '集采价/项目(元)' },
-    { value: 'price', label: '代发价(元)' },
+    { value: 'price', label: '代发价(元) *' },
     { value: 'gross_weight', label: '毛重(kg)' },
     { value: 'box_spec', label: '箱规' },
     { value: 'cooperation_level', label: '合作等级' },

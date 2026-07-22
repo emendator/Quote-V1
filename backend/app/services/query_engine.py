@@ -9,8 +9,10 @@ from app.services.message_parser import message_parser
 class QueryEngine:
     """智能查询引擎"""
 
-    async def execute_smart_query(self, db: AsyncSession, query_text: str) -> Dict[str, Any]:
-        """执行智能查询"""
+    async def execute_smart_query(self, db: AsyncSession, query_text: str, owner_id: Optional[int] = None) -> Dict[str, Any]:
+        """执行智能查询（支持数据隔离）"""
+        # 设置当前 owner_id，供 _execute_and_fetch 使用
+        self._current_owner_id = owner_id
         # 1. 解析消息
         parsed = message_parser.parse(query_text)
         raw_queries = parsed.get("queries", [])
@@ -37,7 +39,7 @@ class QueryEngine:
         if specific_queries:
             data_queries = specific_queries
         elif all_q:
-            products, total = await self._query_all(db, effective_sort)
+            products, total = await self._query_all(db, effective_sort, owner_id=owner_id)
             return {
                 "query_intent": "all_products",
                 "parsed_params": {},
@@ -50,13 +52,13 @@ class QueryEngine:
 
         # 4. 处理单个查询
         if len(data_queries) == 1:
-            return await self._execute_single_query(db, data_queries[0], effective_sort)
+            return await self._execute_single_query(db, data_queries[0], effective_sort, owner_id=owner_id)
 
         # 5. 处理多个查询 —— AND 联合（取交集）
         all_product_sets = []
         parsed_queries = []
         for q in data_queries:
-            result = await self._execute_single_query(db, q, effective_sort, return_raw=True)
+            result = await self._execute_single_query(db, q, effective_sort, return_raw=True, owner_id=owner_id)
             parsed_queries.append(result)
             if result.get("results"):
                 all_product_sets.append({p["id"] for p in result["results"]})
@@ -90,9 +92,10 @@ class QueryEngine:
         }
 
     async def _execute_single_query(
-        self, db: AsyncSession, query: Dict[str, Any], sort_order: Optional[str] = None, return_raw: bool = False
+        self, db: AsyncSession, query: Dict[str, Any], sort_order: Optional[str] = None,
+        return_raw: bool = False, owner_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        """执行单个查询"""
+        """执行单个查询（支持数据隔离）"""
         qtype = query["type"]
         value = query.get("value", "")
 
@@ -297,27 +300,35 @@ class QueryEngine:
         return query.order_by(model.id.desc())
 
     async def _execute_and_fetch(self, db: AsyncSession, query) -> tuple:
-        """执行查询并返回结果"""
+        """执行查询并返回结果（支持数据隔离）"""
+        if hasattr(self, '_current_owner_id') and self._current_owner_id is not None:
+            query = query.where(Product.owner_id == self._current_owner_id)
         result = await db.execute(query)
         items = list(result.scalars().all())
         return items, len(items)
 
     # ========== 精确/模糊字段查询 ==========
 
-    async def _query_by_barcode(self, db, barcode: str, sort_order=None):
+    async def _query_by_barcode(self, db, barcode: str, sort_order=None, owner_id=None):
+        if owner_id is not None:
+            self._current_owner_id = owner_id
         q = select(Product).where(Product.barcode_69 == barcode)
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)
 
-    async def _query_by_model(self, db, model: str, sort_order=None):
+    async def _query_by_model(self, db, model: str, sort_order=None, owner_id=None):
+        if owner_id is not None:
+            self._current_owner_id = owner_id
         q = select(Product).where(
             or_(Product.product_model.ilike(f"%{model}%"), Product.quick_model.ilike(f"%{model}%"))
         )
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)
 
-    async def _query_by_quick_model(self, db, model: str, sort_order=None, fuzzy: bool = True):
-        """按快查型号查询（支持模糊匹配）"""
+    async def _query_by_quick_model(self, db, model: str, sort_order=None, fuzzy: bool = True, owner_id=None):
+        """按快查型号查询（支持模糊匹配，数据隔离）"""
+        if owner_id is not None:
+            self._current_owner_id = owner_id
         if fuzzy:
             q = select(Product).where(Product.quick_model.ilike(f"%{model}%"))
         else:
@@ -326,15 +337,16 @@ class QueryEngine:
         return await self._execute_and_fetch(db, q)
 
     async def execute_batch_model_query(
-        self, db: AsyncSession, queries: list, fuzzy: bool = True
+        self, db: AsyncSession, queries: list, fuzzy: bool = True, owner_id: Optional[int] = None
     ) -> dict:
-        """批量快查型号查询：每个查询独立执行，返回分组结果"""
+        """批量快查型号查询：每个查询独立执行，返回分组结果（数据隔离）"""
+        self._current_owner_id = owner_id
         items = []
         for q_text in queries:
             q_text = q_text.strip()
             if not q_text:
                 continue
-            products, total = await self._query_by_quick_model(db, q_text, fuzzy=fuzzy)
+            products, total = await self._query_by_quick_model(db, q_text, fuzzy=fuzzy, owner_id=owner_id)
             items.append({
                 "query": q_text,
                 "results": [p.to_dict() for p in products],
@@ -542,7 +554,9 @@ class QueryEngine:
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)
 
-    async def _query_all(self, db, sort_order=None):
+    async def _query_all(self, db, sort_order=None, owner_id=None):
+        if owner_id is not None:
+            self._current_owner_id = owner_id
         q = select(Product)
         q = await self._apply_sort(q, Product, sort_order)
         return await self._execute_and_fetch(db, q)

@@ -229,3 +229,142 @@ export interface TestConnectionResult {
     success: boolean;
     message: string;
 }
+
+// ========== 用户认证相关 ==========
+
+export type UserRole = 'super_admin' | 'admin' | 'user';
+
+export interface User {
+    id: number;
+    username: string;
+    email: string;
+    role: UserRole;
+    company_name: string;
+    contact_person: string;
+    contact_phone: string;
+    company_address: string;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface LoginRequest {
+    username: string;
+    password: string;
+}
+
+export interface LoginResponse {
+    access_token: string;
+    token_type: string;
+    user: User;
+}
+
+export interface RegisterRequest {
+    username: string;
+    password: string;
+    email: string;
+    invite_code: string;
+}
+
+export interface CompanyInfoUpdate {
+    company_name: string;
+    contact_person?: string;
+    contact_phone?: string;
+    company_address?: string;
+}
+
+// ========== 邀请码相关 ==========
+
+export interface InviteCode {
+    id: number;
+    code: string;
+    type: 'admin' | 'user';
+    created_by: number;
+    used_by: number | null;
+    used_by_username: string;       // 使用者的用户名
+    used_by_company: string;        // 使用者公司名称
+    used_by_last_login: string | null;  // 使用者最后登录时间
+    used_at: string | null;
+    expires_at: string;
+    is_used: boolean;
+    created_at: string;
+}
+
+// ========== 推荐产品相关 ==========
+
+export interface RecommendedProduct {
+    id: number;
+    quick_model: string;
+    product_model: string;
+    product_name: string;
+    brand: string;
+    category_level1: string;
+    category_level2: string;
+    category_level3: string;
+    price: number;
+    specification: string;
+    supply_status: string;
+    image: string;
+    source_company_name: string;  // 来源公司名称
+    source_role: string;          // 来源角色
+}
+
+export interface RecommendedProductResponse {
+    items: RecommendedProduct[];
+    total: number;
+    page: number;
+    page_size: number;
+    recommendation_note: string;
+}
+
+// ========== 智能方案相关 ==========
+
+export interface SolutionAnalyzeRequest {
+    requirement: string;
+    use_ai: boolean;
+    filters?: Record<string, unknown>;
+}
+
+export interface SolutionCandidate {
+    id: number;
+    quick_model: string;
+    product_model: string;
+    product_name: string;
+    brand: string;
+    category_level1: string;
+    category_level2: string;
+    specification: string;
+    price: number;
+    supply_status: string;
+    is_recommended?: boolean;
+    source_company_name?: string;
+    source_role?: string;
+}
+
+export interface SolutionAnalyzeResult {
+    parsed_intent: Record<string, unknown>;
+    ai_interpretation: string;
+    candidates: SolutionCandidate[];
+    total_candidates: number;
+    message: string;
+}
+
+export interface SolutionItemData {
+    product_id: number;
+    quantity: number;
+}
+
+export interface SolutionSaveRequest {
+    name: string;
+    requirement: string;
+    remark?: string;
+    ai_enabled: boolean;
+    items: SolutionItemData[];
+}
+
+export interface SolutionSaveResult {
+    plan_id: number;
+    name: string;
+    total_amount: number;
+    items_count: number;
+}

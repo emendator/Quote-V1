@@ -13,9 +13,11 @@ interface PageStateContextValue {
     getState: <T>(pageKey: string, defaults: T) => T;
     /** 保存某个页面的状态 */
     setState: (pageKey: string, state: PageState) => void;
+    /** 清空所有页面状态（切换账号时调用） */
+    clearAllStates: () => void;
 }
 
-const PageStateContext = createContext<PageStateContextValue | null>(null);
+export const PageStateContext = createContext<PageStateContextValue | null>(null);
 
 export function PageStateProvider({ children }: { children: React.ReactNode }) {
     // 使用 ref 存储所有页面状态，页面切走再回来时恢复
@@ -29,8 +31,12 @@ export function PageStateProvider({ children }: { children: React.ReactNode }) {
         statesRef.current[pageKey] = state;
     }, []);
 
+    const clearAllStates = useCallback(() => {
+        statesRef.current = {};
+    }, []);
+
     return (
-        <PageStateContext.Provider value={{ getState, setState }}>
+        <PageStateContext.Provider value={{ getState, setState, clearAllStates }}>
             {children}
         </PageStateContext.Provider>
     );

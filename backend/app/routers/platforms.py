@@ -4,6 +4,7 @@
 import json
 import logging
 from typing import Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,9 @@ from app.schemas import (
     ListingLogDetailResponse,
 )
 from app.services.listing_service import listing_service
+from app.services.platform_analyzer import analyze_platform_doc
+from app.models import User
+from app.utils.auth_utils import get_current_user
 
 router = APIRouter(prefix="/api", tags=["平台管理与一键上架"])
 logger = logging.getLogger("platforms")
@@ -29,7 +33,10 @@ logger = logging.getLogger("platforms")
 # ======================================================================
 
 @router.get("/platforms", response_model=ApiResponse)
-async def list_platforms(db: AsyncSession = Depends(get_db)):
+async def list_platforms(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """获取所有平台配置"""
     from sqlalchemy import select
     result = await db.execute(select(PlatformConfig).order_by(PlatformConfig.id))
@@ -38,7 +45,11 @@ async def list_platforms(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/platforms", response_model=ApiResponse)
-async def create_platform(data: PlatformConfigCreate, db: AsyncSession = Depends(get_db)):
+async def create_platform(
+    data: PlatformConfigCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """新增平台配置"""
     platform = PlatformConfig(
         name=data.name,
@@ -57,10 +68,28 @@ async def create_platform(data: PlatformConfigCreate, db: AsyncSession = Depends
     return ApiResponse(data=platform.to_dict(), message="新增成功")
 
 
+class AnalyzeDocRequest(BaseModel):
+    url: str
+
+
+@router.post("/platforms/analyze-doc", response_model=ApiResponse)
+async def analyze_platform_api_doc(
+    data: AnalyzeDocRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """智能分析电商平台 API 文档网址，提取对接所需的配置字段"""
+    if not data.url.startswith(("http://", "https://")):
+        return ApiResponse(code=400, message="请输入有效的网址（以 http:// 或 https:// 开头）")
+
+    result = await analyze_platform_doc(data.url)
+    return ApiResponse(data=result)
+
+
 @router.put("/platforms/{platform_id}", response_model=ApiResponse)
 async def update_platform(
     platform_id: int,
     data: PlatformConfigUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """更新平台配置"""
@@ -87,7 +116,11 @@ async def update_platform(
 
 
 @router.delete("/platforms/{platform_id}", response_model=ApiResponse)
-async def delete_platform(platform_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_platform(
+    platform_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """删除平台配置"""
     from sqlalchemy import select
     result = await db.execute(select(PlatformConfig).where(PlatformConfig.id == platform_id))
@@ -102,7 +135,11 @@ async def delete_platform(platform_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/platforms/{platform_id}/test", response_model=ApiResponse)
-async def test_platform_connection(platform_id: int, db: AsyncSession = Depends(get_db)):
+async def test_platform_connection(
+    platform_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """测试平台连接"""
     result = await listing_service.test_platform_connection(db, platform_id)
     return ApiResponse(data=result, message=result.get("message", ""))
@@ -113,7 +150,11 @@ async def test_platform_connection(platform_id: int, db: AsyncSession = Depends(
 # ======================================================================
 
 @router.post("/listing/submit", response_model=ApiResponse)
-async def submit_listing(data: ListingSubmitRequest, db: AsyncSession = Depends(get_db)):
+async def submit_listing(
+    data: ListingSubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """提交商品上架"""
     if not data.product_ids:
         return ApiResponse(code=400, message="请选择要上架的商品")
@@ -131,6 +172,7 @@ async def list_listing_logs(
     status: Optional[str] = None,
     platform_id: Optional[int] = None,
     product_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """上架日志列表"""
@@ -146,7 +188,11 @@ async def list_listing_logs(
 
 
 @router.get("/listing/logs/{log_id}", response_model=ApiResponse)
-async def get_listing_log_detail(log_id: int, db: AsyncSession = Depends(get_db)):
+async def get_listing_log_detail(
+    log_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """上架日志详情"""
     log = await listing_service.get_listing_log_detail(db, log_id)
     if not log:

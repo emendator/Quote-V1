@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import {
     Modal, Steps, Upload, Button, Table, Select, Radio,
-    Result, Space, message, Alert, List, Typography,
+    Result, Space, message, Alert, List, Typography, Tooltip,
 } from 'antd';
 import {
     InboxOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -118,10 +118,11 @@ export default function ImportDialog({ open, onClose, onSuccess }: Props) {
             message.warning('请至少映射「快查型号」字段（用于数据去重）');
             return;
         }
-        if (!mappedFields.includes('product_model')) {
-            message.warning('请至少映射「型号」字段');
-            return;
-        }
+        // 型号已改为非必填（仅快查型号和代发价为必填）
+        // if (!mappedFields.includes('product_model')) {
+        //     message.warning('请至少映射「型号」字段');
+        //     return;
+        // }
 
         setLoading(true);
         try {
@@ -257,6 +258,7 @@ export default function ImportDialog({ open, onClose, onSuccess }: Props) {
                                             dataIndex: col,
                                             key: col,
                                             ellipsis: true,
+                                            render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-',
                                         }))}
                                         dataSource={activeResult.preview_rows.map((row, idx) => {
                                             const obj: Record<string, string> = { key: String(idx) };

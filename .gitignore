@@ -46,6 +46,10 @@ backend/*.db
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/*.tsbuildinfo
+
+# Vite root cache
+/.vite/
 
 # System
 .DS_Store
@@ -62,3 +66,4 @@ test_*.json
 import_payload.json
 upload_result.json
 /工作日报
+/docs

@@ -70,7 +70,7 @@ export default function DataManagePage() {
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize, keyword, category]);
+    }, [page, pageSize, keyword, category, sortBy, sortOrder]);
 
     const loadCategories = async () => {
         try {

@@ -124,13 +124,6 @@ class ProductResponse(BaseModel):
         return v.isoformat()
 
 
-class PaginatedResponse(BaseModel):
-    items: List[ProductResponse]
-    total: int
-    page: int
-    page_size: int
-
-
 class BatchDeleteRequest(BaseModel):
     ids: List[int]
 
@@ -166,43 +159,12 @@ class SmartQueryRequest(BaseModel):
     query_text: str
 
 
-class ParsedQuery(BaseModel):
-    type: str
-    value: Optional[str] = None
-    results: List[ProductResponse] = []
-    count: int = 0
-    message: str = ""
-
-
-class SmartQueryResponse(BaseModel):
-    query_intent: str
-
-
 # ========== 批量快查型号查询 ==========
 
 class BatchModelQueryRequest(BaseModel):
     """批量快查型号查询请求"""
     queries: List[str]
     fuzzy: bool = True  # 是否模糊匹配
-
-
-class BatchModelQueryItem(BaseModel):
-    query: str
-    results: List[ProductResponse] = []
-    count: int = 0
-    message: str = ""
-
-
-class BatchModelQueryResponse(BaseModel):
-    total_queries: int
-    total_results: int
-    items: List[BatchModelQueryItem]
-    parsed_params: dict = {}
-    parsed_queries: List[ParsedQuery] = []
-    results: List[ProductResponse] = []
-    result_count: int = 0
-    message: str = ""
-    unrecognized_text: str = ""
 
 
 # ========== 平台配置相关 ==========
@@ -307,6 +269,156 @@ class ListingLogResponse(BaseModel):
 class ListingLogDetailResponse(ListingLogResponse):
     request_data: dict = {}
     response_data: dict = {}
+
+
+# ========== 智能方案相关 ==========
+
+class SolutionAnalyzeRequest(BaseModel):
+    requirement: str
+    use_ai: bool = False
+    filters: dict = {}
+
+
+class SolutionCandidate(BaseModel):
+    id: int
+    quick_model: str = ""
+    product_model: str = ""
+    product_name: str = ""
+    brand: str = ""
+    category_level1: str = ""
+    category_level2: str = ""
+    specification: str = ""
+    price: float = 0
+    supply_status: str = ""
+
+    # 推荐产品特有字段
+    is_recommended: bool = False
+    source_company_name: str = ""
+    source_role: str = ""
+
+
+class SolutionItemData(BaseModel):
+    product_id: int
+    quantity: int = 1
+
+
+class SolutionSaveRequest(BaseModel):
+    name: str = ""
+    requirement: str = ""
+    remark: str = ""
+    ai_enabled: bool = False
+    items: list = []
+
+
+class SolutionExportRequest(BaseModel):
+    plan_id: int
+
+
+# ========== 用户认证相关 ==========
+
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=20, pattern=r'^[a-zA-Z0-9_]+$')
+    password: str = Field(..., min_length=6, max_length=32)
+    email: str = Field(..., max_length=200)
+    invite_code: str = Field(...)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(...)
+    password: str = Field(...)
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    role: str
+    company_name: str = ""
+    contact_person: str = ""
+    contact_phone: str = ""
+    company_address: str = ""
+    is_active: bool = True
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class CompanyInfoUpdate(BaseModel):
+    company_name: str = Field(..., min_length=1, max_length=200)
+    contact_person: Optional[str] = ""
+    contact_phone: Optional[str] = ""
+    company_address: Optional[str] = ""
+
+
+class PasswordChangeRequest(BaseModel):
+    old_password: str = Field(...)
+    new_password: str = Field(..., min_length=6, max_length=32)
+
+
+# ========== 邀请码相关 ==========
+
+class InviteCodeCreateRequest(BaseModel):
+    code_type: str = Field(..., pattern=r'^(admin|user)$')
+    expires_in_days: int = Field(default=7, ge=1, le=30)
+
+
+class InviteCodeResponse(BaseModel):
+    id: int
+    code: str
+    type: str
+    created_by: int
+    used_by: Optional[int] = None
+    used_by_username: str = ""        # 使用者的用户名
+    used_by_company: str = ""         # 使用者公司名称
+    used_by_last_login: Optional[str] = None  # 使用者最后登录时间
+    used_at: Optional[str] = None
+    expires_at: str
+    is_used: bool
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class InviteCodeVerifyResponse(BaseModel):
+    valid: bool
+    type: Optional[str] = None
+    message: str = ""
+
+
+# ========== 推荐产品相关 ==========
+
+class RecommendedProductRequest(BaseModel):
+    filters: dict = {}
+    page: int = 1
+    page_size: int = 20
+
+
+class RecommendedProduct(BaseModel):
+    id: int
+    owner_id: int = 0
+    quick_model: str = ""
+    product_model: str = ""
+    product_name: str = ""
+    brand: str = ""
+    category_level1: str = ""
+    category_level2: str = ""
+    category_level3: str = ""
+    price: float = 0
+    specification: str = ""
+    supply_status: str = ""
+    image: str = ""
+    # 推荐产品特有字段
+    source_company_name: str = ""  # 来源公司名称
+    source_role: str = ""          # 来源角色: super_admin/admin
 
 
 # ========== 通用响应包装 ==========

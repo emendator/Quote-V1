@@ -52,17 +52,47 @@ exit /b 1
 
 :found_python
 echo [检测] Python路径: %PYTHON_CMD%
+echo.
 
-:: 启动后端
-start "智能报价-后端" cmd /c "cd /d "%~dp0backend" && set PYTHONPATH=%~dp0backend && %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+:: 安装/检查 Python 依赖
+if exist "%~dp0.venv" (
+    echo [安装] 检测到虚拟环境，跳过依赖安装（如需重新安装请删除 .venv 文件夹）
+) else (
+    echo [安装] 正在检查并安装 Python 依赖...
+    "%PYTHON_CMD%" -m pip install -r "%~dp0backend\requirements.txt" -q
+    if errorlevel 1 (
+        echo [错误] Python 依赖安装失败！
+        echo 请手动执行: cd backend ^&^& pip install -r requirements.txt
+        pause
+        exit /b 1
+    )
+    echo [安装] Python 依赖安装完成
+)
+echo.
 
-:: 等待后端启动
+:: 启动后端（不使用 --reload，避免因文件监听器不稳定导致后端进程意外退出）
+:: 如需开发模式（热重载），可将下面命令改为使用 --reload
+start "智能报价-后端" cmd /c "cd /d "%~dp0backend" && set PYTHONPATH=%~dp0backend && "%PYTHON_CMD%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+:: 等待后端启动（最多等待 30 秒）
 echo 等待后端服务启动...
+set WAIT_COUNT=0
 :wait_loop
 timeout /t 2 /nobreak >nul
+set /a WAIT_COUNT+=1
 >nul 2>&1 curl -s http://127.0.0.1:8000/api/health
 if errorlevel 1 (
-    echo 正在启动...
+    if %WAIT_COUNT% geq 15 (
+        echo [错误] 后端启动超时，请检查:
+        echo   - 是否已安装 Python 3.9+
+        echo   - Python 依赖是否安装成功
+        echo   - 端口 8000 是否被占用
+        echo.
+        echo 可右键 "启动.bat" ^> "以管理员身份运行" 重试
+        pause
+        exit /b 1
+    )
+    echo 正在启动...（%WAIT_COUNT%/15）
     goto wait_loop
 )
 echo [完成] 后端服务已启动 (http://127.0.0.1:8000)
@@ -71,6 +101,22 @@ echo.
 echo [2/3] 正在启动前端服务...
 echo.
 cd /d "%~dp0frontend"
+
+:: 检查/安装前端依赖
+if not exist "node_modules" (
+    echo [安装] 正在安装前端依赖（首次运行需要下载，请耐心等待）...
+    call npm install
+    if errorlevel 1 (
+        echo [错误] 前端依赖安装失败！
+        echo 请确保已安装 Node.js（https://nodejs.org）
+        pause
+        exit /b 1
+    )
+    echo [安装] 前端依赖安装完成
+) else (
+    echo [检测] 前端依赖已存在，跳过安装
+)
+echo.
 
 :: 启动前端
 start "智能报价-前端" cmd /c "cd /d "%~dp0frontend" && npm run dev"

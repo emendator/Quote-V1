@@ -16,10 +16,16 @@ async def get_products(
     sort_order: str = "asc",
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
+    owner_id: Optional[int] = None,
 ) -> Tuple[List[Product], int]:
-    """分页查询商品列表"""
+    """分页查询商品列表（数据隔离：按 owner_id 过滤）"""
     query = select(Product)
     count_query = select(func.count(Product.id))
+
+    # 数据隔离：按 owner_id 过滤
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+        count_query = count_query.where(Product.owner_id == owner_id)
 
     # 关键词搜索（快查型号/商品型号/品牌/产品名称/69码）
     if keyword:
@@ -79,9 +85,14 @@ async def export_products(
     sort_order: str = "asc",
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
+    owner_id: Optional[int] = None,
 ) -> bytes:
-    """导出全部符合条件的商品到 Excel 文件（无分页）"""
+    """导出全部符合条件的商品到 Excel 文件（无分页，数据隔离）"""
     query = select(Product)
+
+    # 数据隔离：按 owner_id 过滤
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
 
     if keyword:
         kw_filter = or_(
@@ -184,14 +195,26 @@ async def export_products(
     return buf.getvalue()
 
 
-async def get_product_by_id(db: AsyncSession, product_id: int) -> Optional[Product]:
-    """根据 ID 获取商品"""
-    result = await db.execute(select(Product).where(Product.id == product_id))
+async def get_product_by_id(db: AsyncSession, product_id: int, owner_id: Optional[int] = None) -> Optional[Product]:
+    """根据 ID 获取商品（数据隔离）"""
+    query = select(Product).where(Product.id == product_id)
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    result = await db.execute(query)
     return result.scalar_one_or_none()
 
+async def get_products_by_ids(db: AsyncSession, ids: List[int], owner_id: Optional[int] = None) -> List[Product]:
+    """批量获取商品详情（数据隔离）"""
+    query = select(Product).where(Product.id.in_(ids))
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    result = await db.execute(query)
+    return list(result.scalars().all())
 
-async def create_product(db: AsyncSession, data: dict) -> Product:
-    """新增商品"""
+async def create_product(db: AsyncSession, data: dict, owner_id: Optional[int] = None) -> Product:
+    """新增商品（绑定 owner_id）"""
+    if owner_id is not None:
+        data["owner_id"] = owner_id
     product = Product(**data)
     db.add(product)
     await db.flush()
@@ -199,9 +222,9 @@ async def create_product(db: AsyncSession, data: dict) -> Product:
     return product
 
 
-async def update_product(db: AsyncSession, product_id: int, data: dict) -> Optional[Product]:
-    """更新商品"""
-    product = await get_product_by_id(db, product_id)
+async def update_product(db: AsyncSession, product_id: int, data: dict, owner_id: Optional[int] = None) -> Optional[Product]:
+    """更新商品（数据隔离）"""
+    product = await get_product_by_id(db, product_id, owner_id=owner_id)
     if not product:
         return None
     for key, value in data.items():
@@ -212,9 +235,9 @@ async def update_product(db: AsyncSession, product_id: int, data: dict) -> Optio
     return product
 
 
-async def delete_product(db: AsyncSession, product_id: int) -> bool:
-    """删除单个商品"""
-    product = await get_product_by_id(db, product_id)
+async def delete_product(db: AsyncSession, product_id: int, owner_id: Optional[int] = None) -> bool:
+    """删除单个商品（数据隔离）"""
+    product = await get_product_by_id(db, product_id, owner_id=owner_id)
     if not product:
         return False
     await db.delete(product)
@@ -222,32 +245,51 @@ async def delete_product(db: AsyncSession, product_id: int) -> bool:
     return True
 
 
-async def batch_delete_products(db: AsyncSession, ids: List[int]) -> int:
-    """批量删除商品，返回删除数量"""
-    result = await db.execute(delete(Product).where(Product.id.in_(ids)))
+async def batch_delete_products(db: AsyncSession, ids: List[int], owner_id: Optional[int] = None) -> int:
+    """批量删除商品（数据隔离）"""
+    query = delete(Product).where(Product.id.in_(ids))
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    result = await db.execute(query)
     await db.flush()
     return result.rowcount
 
 
-async def get_all_categories(db: AsyncSession) -> List[str]:
-    """获取所有一级品类"""
-    result = await db.execute(select(Product.category_level1).distinct().where(Product.category_level1 != ""))
+async def get_all_categories(db: AsyncSession, owner_id: Optional[int] = None) -> List[str]:
+    """获取所有一级品类（数据隔离）"""
+    query = select(Product.category_level1).distinct().where(Product.category_level1 != "")
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    query = query.order_by(Product.category_level1)
+    result = await db.execute(query)
     return [row[0] for row in result.all()]
 
 
-async def get_all_brands(db: AsyncSession) -> List[str]:
-    """获取所有品牌"""
-    result = await db.execute(select(Product.brand).distinct().where(Product.brand != ""))
+async def get_all_brands(db: AsyncSession, owner_id: Optional[int] = None) -> List[str]:
+    """获取所有品牌（数据隔离）"""
+    query = select(Product.brand).distinct().where(Product.brand != "")
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    query = query.order_by(Product.brand)
+    result = await db.execute(query)
     return [row[0] for row in result.all()]
 
 
-async def get_all_category_level2(db: AsyncSession) -> List[str]:
-    """获取所有二级品类"""
-    result = await db.execute(select(Product.category_level2).distinct().where(Product.category_level2 != ""))
+async def get_all_category_level2(db: AsyncSession, owner_id: Optional[int] = None) -> List[str]:
+    """获取所有二级品类（数据隔离）"""
+    query = select(Product.category_level2).distinct().where(Product.category_level2 != "")
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    query = query.order_by(Product.category_level2)
+    result = await db.execute(query)
     return [row[0] for row in result.all()]
 
 
-async def get_all_category_level3(db: AsyncSession) -> List[str]:
-    """获取所有三级品类"""
-    result = await db.execute(select(Product.category_level3).distinct().where(Product.category_level3 != ""))
+async def get_all_category_level3(db: AsyncSession, owner_id: Optional[int] = None) -> List[str]:
+    """获取所有三级品类（数据隔离）"""
+    query = select(Product.category_level3).distinct().where(Product.category_level3 != "")
+    if owner_id is not None:
+        query = query.where(Product.owner_id == owner_id)
+    query = query.order_by(Product.category_level3)
+    result = await db.execute(query)
     return [row[0] for row in result.all()]

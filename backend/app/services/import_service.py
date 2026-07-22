@@ -126,8 +126,8 @@ def _clean_previous_uploads(current_file_path: str):
                     logger.warning(f"清理残留文件失败 {fname}: {e}")
 
 
-def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strategy: str) -> Dict[str, Any]:
-    """执行数据导入 —— 以快查型号为准去重"""
+def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strategy: str, owner_id: int = 0) -> Dict[str, Any]:
+    """执行数据导入 —— 以快查型号为准去重（数据隔离：绑定 owner_id）"""
     if file_id not in _upload_cache:
         raise ValueError("文件已过期，请重新上传")
 
@@ -239,21 +239,18 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                         else:
                             row_data[sf] = str(val).strip()
 
-                # 确保型号有效（必填项）
+                # 型号可为空（仅快查型号和代发价为必填）
                 product_model = row_data.get("product_model", "")
-                if not product_model:
-                    error_rows += 1
-                    import_errors.append({"row": int(idx) + 2, "reason": "型号为空"})
-                    continue
+                row_data["product_model"] = product_model if product_model else ""
 
                 # 确保代发价(price)有效（必填项）
                 try:
                     price_val = float(row_data.get("price", 0))
                 except (ValueError, TypeError):
                     price_val = 0
-                if price_val <= 0:
+                if price_val < 0:
                     error_rows += 1
-                    import_errors.append({"row": int(idx) + 2, "reason": "代发价为空或无效"})
+                    import_errors.append({"row": int(idx) + 2, "reason": "代发价不能为负数"})
                     continue
                 row_data["price"] = price_val
 
@@ -278,7 +275,9 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                         skip_details.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}），已跳过"})
                         continue
                     elif duplicate_strategy == "overwrite":
-                        set_clause = ", ".join([f"{f}=:{f}" for f in existing_fields if f != "id"])
+                        row_data["owner_id"] = owner_id
+                        set_fields = [f for f in existing_fields if f != "id"] + ["owner_id"]
+                        set_clause = ", ".join([f"{f}=:{f}" for f in set_fields])
                         now_beijing = datetime.now(timezone(timedelta(hours=8))).isoformat()
                         conn.execute(
                             text(f"""UPDATE products SET {set_clause},
@@ -293,9 +292,10 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                         import_errors.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}）"})
                         continue
 
-                # 插入新记录
+                # 插入新记录（绑定 owner_id）
                 now_beijing = datetime.now(timezone(timedelta(hours=8))).isoformat()
-                insert_fields = existing_fields + ["created_at", "updated_at"]
+                row_data["owner_id"] = owner_id
+                insert_fields = existing_fields + ["owner_id", "created_at", "updated_at"]
                 insert_placeholders = ", ".join([f":{f}" for f in insert_fields])
                 row_data["created_at"] = now_beijing
                 row_data["updated_at"] = now_beijing

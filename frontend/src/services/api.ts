@@ -20,6 +20,17 @@ import type {
     ListingLogQuery,
     PaginatedListingLogs,
     ListingLogDetail,
+    SolutionAnalyzeRequest,
+    SolutionAnalyzeResult,
+    SolutionSaveRequest,
+    SolutionSaveResult,
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    User,
+    CompanyInfoUpdate,
+    InviteCode,
+    RecommendedProductResponse,
 } from '../types';
 
 const api = axios.create({
@@ -27,11 +38,47 @@ const api = axios.create({
     timeout: 120000, // 默认超时 120 秒
 });
 
+// 请求拦截器：自动附加 Token
+api.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
 // 响应拦截器
 api.interceptors.response.use(
-    (res) => res.data,
+    (res) => {
+        const body = res.data;
+        // 后端返回的业务 code 非 200 时也当作错误处理
+        if (body && typeof body === 'object' && body.code !== undefined && body.code !== 200) {
+            const msg = body.message || '请求失败';
+            // 401 未登录/登录过期，清除本地存储并跳转
+            if (body.code === 401) {
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('auth_user');
+                if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                    window.location.href = '/login';
+                }
+            }
+            return Promise.reject(new Error(msg));
+        }
+        return body;
+    },
     (err) => {
-        const msg = err.response?.data?.message || err.message || '请求失败';
+        // HTTP 层面错误（如网络断开、500等）
+        if (err.response?.status === 401) {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_user');
+            if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                window.location.href = '/login';
+            }
+        }
+        const msg = err.response?.data?.detail || err.response?.data?.message || err.message || '请求失败';
         return Promise.reject(new Error(msg));
     }
 );
@@ -45,6 +92,11 @@ export async function fetchProducts(params: ProductQuery): Promise<PaginatedData
 
 export async function fetchProduct(id: number): Promise<Product> {
     const res = await api.get<unknown, ApiResponse<Product>>(`/products/${id}`);
+    return res.data;
+}
+
+export async function fetchProductsByIds(ids: number[]): Promise<Product[]> {
+    const res = await api.post<unknown, ApiResponse<Product[]>>('/products/batch-detail', { ids });
     return res.data;
 }
 
@@ -156,6 +208,60 @@ export async function batchModelQuery(data: BatchModelQueryRequest): Promise<Bat
     return res.data;
 }
 
+// ========== 智能方案 ==========
+
+export async function analyzeSolution(data: SolutionAnalyzeRequest): Promise<SolutionAnalyzeResult> {
+    const res = await api.post<unknown, ApiResponse<SolutionAnalyzeResult>>('/solution/analyze', data);
+    return res.data;
+}
+
+export async function saveSolution(data: SolutionSaveRequest): Promise<SolutionSaveResult> {
+    const res = await api.post<unknown, ApiResponse<SolutionSaveResult>>('/solution/save', data);
+    return res.data;
+}
+
+export async function listSolutions(): Promise<{ id: number; name: string; requirement: string; total_amount: number; status: string; created_at: string }[]> {
+    const res = await api.get<unknown, ApiResponse<{ id: number; name: string; requirement: string; total_amount: number; status: string; created_at: string }[]>>('/solution/list');
+    return res.data;
+}
+
+export async function getSolutionDetail(planId: number): Promise<Record<string, unknown>> {
+    const res = await api.get<unknown, ApiResponse<Record<string, unknown>>>(`/solution/${planId}`);
+    return res.data;
+}
+
+export async function deleteSolution(planId: number): Promise<void> {
+    await api.delete(`/solution/${planId}`);
+}
+
+export async function exportSolution(planId: number): Promise<void> {
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`/api/solution/export`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ plan_id: planId }),
+    });
+    if (!response.ok) throw new Error('导出失败');
+    // 检查响应类型，如果是 JSON 说明后端返回了错误信息（如 404 方案不存在）
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        const errBody = await response.json();
+        throw new Error(errBody?.message || '导出失败');
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `方案_${planId}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+}
+
 // ========== 平台配置管理 ==========
 
 export async function fetchPlatforms(): Promise<PlatformConfig[]> {
@@ -177,6 +283,11 @@ export async function deletePlatform(id: number): Promise<void> {
     await api.delete(`/platforms/${id}`);
 }
 
+export async function analyzePlatformDoc(url: string): Promise<Record<string, unknown>> {
+    const res = await api.post<unknown, ApiResponse<Record<string, unknown>>>('/platforms/analyze-doc', { url });
+    return res.data;
+}
+
 export async function testPlatformConnection(id: number): Promise<TestConnectionResult> {
     const res = await api.post<unknown, ApiResponse<TestConnectionResult>>(`/platforms/${id}/test`);
     return res.data;
@@ -196,5 +307,59 @@ export async function fetchListingLogs(params: ListingLogQuery = {}): Promise<Pa
 
 export async function fetchListingLogDetail(id: number): Promise<ListingLogDetail> {
     const res = await api.get<unknown, ApiResponse<ListingLogDetail>>(`/listing/logs/${id}`);
+    return res.data;
+}
+
+// ========== 用户认证 ==========
+
+export async function login(data: LoginRequest): Promise<LoginResponse> {
+    const res = await api.post<unknown, ApiResponse<LoginResponse>>('/auth/login', data);
+    return res.data;
+}
+
+export async function register(data: RegisterRequest): Promise<LoginResponse> {
+    const res = await api.post<unknown, ApiResponse<LoginResponse>>('/auth/register', data);
+    return res.data;
+}
+
+export async function getCurrentUser(): Promise<User> {
+    const res = await api.get<unknown, ApiResponse<User>>('/auth/me');
+    return res.data;
+}
+
+export async function updateCompanyInfo(data: CompanyInfoUpdate): Promise<User> {
+    const res = await api.put<unknown, ApiResponse<User>>('/auth/me/company', data);
+    return res.data;
+}
+
+export async function changePassword(data: { old_password: string; new_password: string }): Promise<void> {
+    await api.put('/auth/me/password', data);
+}
+
+// ========== 邀请码管理 ==========
+
+export async function createInviteCode(data: { code_type: string; expires_in_days: number }): Promise<InviteCode> {
+    const res = await api.post<unknown, ApiResponse<InviteCode>>('/invites/create', data);
+    return res.data;
+}
+
+export async function getInviteCodes(params?: { page?: number; page_size?: number; type?: string; status?: string }): Promise<{ items: InviteCode[]; total: number; page: number; page_size: number }> {
+    const res = await api.get<unknown, ApiResponse<{ items: InviteCode[]; total: number; page: number; page_size: number }>>('/invites/list', { params });
+    return res.data;
+}
+
+export async function deleteInviteCode(id: number): Promise<void> {
+    await api.delete(`/invites/${id}`);
+}
+
+export async function verifyInviteCode(code: string): Promise<{ valid: boolean; type: string | null; message: string }> {
+    const res = await api.get<unknown, ApiResponse<{ valid: boolean; type: string | null; message: string }>>(`/invites/verify/${code}`);
+    return res.data;
+}
+
+// ========== 推荐产品 ==========
+
+export async function getRecommendedProducts(data: { filters?: Record<string, unknown>; page?: number; page_size?: number }): Promise<RecommendedProductResponse> {
+    const res = await api.post<unknown, ApiResponse<RecommendedProductResponse>>('/products/recommended', data);
     return res.data;
 }

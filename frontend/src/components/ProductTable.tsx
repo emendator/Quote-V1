@@ -1,5 +1,5 @@
-import { Table, Button, Space, Popconfirm, Tag, Input, Image, Tooltip } from 'antd';
-import { EditOutlined, DeleteOutlined, CameraOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Popconfirm, Tag, Input, Tooltip } from 'antd';
+import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Product } from '../types';
 
@@ -58,40 +58,16 @@ export default function ProductTable({
             title: '图片',
             dataIndex: 'image',
             key: 'image',
-            width: 80,
+            width: 65,
             render: (v: string) => {
                 if (!v || v === '') {
                     return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
                 }
-                // 判断是否为 base64 图片数据
-                if (v.startsWith('data:image')) {
-                    return (
-                        <Image
-                            src={v}
-                            alt="产品图片"
-                            width={50}
-                            height={50}
-                            style={{ objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }}
-                            preview={{
-                                mask: <CameraOutlined />,
-                            }}
-                            fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAiIGhlaWdodD0iNTAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjUwIiBoZWlnaHQ9IjUwIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjUiIHk9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5IiBmb250LXNpemU9IjEyIj7lm77niYc8L3RleHQ+PC9zdmc+"
-                        />
-                    );
-                }
-                // 可能是 URL 链接
+                const src = v.startsWith('data:') ? v : `data:image/png;base64,${v}`;
                 return (
-                    <Image
-                        src={v}
-                        alt="产品图片"
-                        width={50}
-                        height={50}
-                        style={{ objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }}
-                        preview={{
-                            mask: <CameraOutlined />,
-                        }}
-                        fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAiIGhlaWdodD0iNTAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjUwIiBoZWlnaHQ9IjUwIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjUiIHk9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5IiBmb250LXNpemU9IjEyIj7lm77niYc8L3RleHQ+PC9zdmc+"
-                    />
+                    <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
+                        <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+                    </Tooltip>
                 );
             },
         },
@@ -100,26 +76,26 @@ export default function ProductTable({
         { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 80, render: (v) => v || '-' },
         { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 80, render: (v) => v || '-' },
         { title: '三级品类', dataIndex: 'category_level3', key: 'category_level3', width: 80, render: (v) => v || '-' },
-        { title: '备货商谈价', dataIndex: 'negotiation_price', key: 'negotiation_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-        { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 80, render: (v) => v || '-' },
-        { title: '上次进货价', dataIndex: 'last_purchase_price', key: 'last_purchase_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-        { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-        { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '备货商谈价', dataIndex: 'negotiation_price', key: 'negotiation_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 95, sorter: true, render: (v) => v ? (v.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || v) : '-' },
+        { title: '上次进货价', dataIndex: 'last_purchase_price', key: 'last_purchase_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
         { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 70, sorter: true, render: (v) => (v ? `${v}%` : '-') },
-        { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
         { title: '链接', dataIndex: 'shop_url', key: 'shop_url', width: 180, ellipsis: true, render: (v) => renderEllipsis(v) },
-        { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-        { title: '集采价/项目', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
-        { title: '代发价', dataIndex: 'price', key: 'price', width: 80, sorter: true, render: (v) => (v ? <span className="price-highlight">¥{v.toFixed(2)}</span> : '-') },
-        { title: '毛重(kg)', dataIndex: 'gross_weight', key: 'gross_weight', width: 70, render: (v) => (v ? v.toFixed(2) : '-') },
+        { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '集采价/项目', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '代发价', dataIndex: 'price', key: 'price', width: 80, sorter: true, render: (v) => (v !== null && v !== undefined && v !== '' ? <span className="price-highlight">¥{Number(v).toFixed(2)}</span> : '-') },
+        { title: '毛重(kg)', dataIndex: 'gross_weight', key: 'gross_weight', width: 70, sorter: true, render: (v) => (v ? v.toFixed(2) : '-') },
         { title: '箱规', dataIndex: 'box_spec', key: 'box_spec', width: 120, render: (v) => v || '-' },
         { title: '合作等级', dataIndex: 'cooperation_level', key: 'cooperation_level', width: 70, render: (v) => v || '-' },
         { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 70, render: (v) => v || '-' },
         { title: '规格', dataIndex: 'specification', key: 'specification', width: 130, ellipsis: true, render: (v) => renderEllipsis(v) },
         { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true, render: (v) => renderEllipsis(v) },
-        { title: '代发运费', dataIndex: 'shipping_fee', key: 'shipping_fee', width: 80, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
+        { title: '代发运费', dataIndex: 'shipping_fee', key: 'shipping_fee', width: 80, sorter: true, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
         { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 150, render: (v) => v || '-' },
-        { title: '销量', dataIndex: 'sales_volume', key: 'sales_volume', width: 60 },
+        { title: '销量', dataIndex: 'sales_volume', key: 'sales_volume', width: 60, sorter: true },
         { title: '推荐理由', dataIndex: 'recommendation', key: 'recommendation', width: 150, ellipsis: true, render: (v) => renderEllipsis(v) },
         { title: '参数', dataIndex: 'parameters', key: 'parameters', width: 100, ellipsis: true, render: (v) => renderEllipsis(v) },
         { title: '3C', dataIndex: 'cert_3c', key: 'cert_3c', width: 70, render: (v) => v || '-' },

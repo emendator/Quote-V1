@@ -58,8 +58,8 @@ export default function ProductForm({ open, editingProduct, onClose, onSuccess }
                 <Form.Item name="quick_model" label="快查型号" rules={[{ required: true, message: '请输入快查型号' }]}>
                     <Input placeholder="快查型号（必填，去重依据）" />
                 </Form.Item>
-                <Form.Item name="product_model" label="型号" rules={[{ required: true, message: '请输入型号' }]}>
-                    <Input placeholder="型号（必填）" />
+                <Form.Item name="product_model" label="型号">
+                    <Input placeholder="型号（选填）" />
                 </Form.Item>
                 <Form.Item name="product_name" label="产品名称">
                     <Input placeholder="产品名称" />

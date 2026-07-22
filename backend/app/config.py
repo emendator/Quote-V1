@@ -26,3 +26,8 @@ ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "***REMOVED-API-KEY***")
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+# JWT 配置（用户认证）
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "***REMOVED-SECRET***")
+JWT_ALGORITHM = "HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
