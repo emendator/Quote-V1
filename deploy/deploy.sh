@@ -8,13 +8,14 @@
 #   2. 系统为 Ubuntu 20.04 / 22.04 / 24.04
 #
 # 端口约定：
-#   - 后端 FastAPI 固定监听 127.0.0.1:8085（仅内网，由 Nginx 反代）
-#     （8085 与本机其它项目后端端口区分，避免冲突）
-#   - 外部访问端口（Nginx）通过第 1 个参数指定，如 8081 / 8086
+#   - 外部访问端口（Nginx）默认 8085（用户指定，访问 http://IP:8085；
+#     内地未备案建议使用非 80 端口）
+#   - 后端 FastAPI 内部监听 127.0.0.1:8008（仅内网由 Nginx 反代；
+#     避开其它项目后端已用的 8003/8004/8005/8006，避免端口冲突）
 #
 # 用法：
 #   cd /opt/smart-quotation
-#   sudo bash deploy/deploy.sh 8081      # 外部访问 http://IP:8081
+#   sudo bash deploy/deploy.sh 8085      # 外部访问 http://IP:8085
 #
 # 会执行：
 #   ① 系统依赖  ② Node.js  ③ 后端依赖  ④ 前端构建
@@ -22,14 +23,14 @@
 # ============================================================
 set -euo pipefail
 
-# 外部访问端口（Nginx）：默认 80；内地未备案建议传非 80 端口（如 8081）
-PORT="${1:-80}"
+# 外部访问端口（Nginx）：默认 8085；内地未备案建议用非 80 端口（如 8085）
+PORT="${1:-8085}"
 case "$PORT" in
-    ''|*[!0-9]*) echo "[ERROR] 端口必须是数字，例如: sudo bash deploy/deploy.sh 8081"; exit 1;;
+    ''|*[!0-9]*) echo "[ERROR] 端口必须是数字，例如: sudo bash deploy/deploy.sh 8085"; exit 1;;
 esac
 
-# 后端内部端口：固定 8085（用户指定，不与其它项目后端冲突）
-BACKEND_PORT="8085"
+# 后端内部端口：8008（外部 Nginx 用 8085，后端内部避开其它项目已用的 8003-8006）
+BACKEND_PORT="8008"
 APP_DIR="/opt/smart-quotation"
 BACKEND_DIR="$APP_DIR/backend"
 FRONTEND_DIR="$APP_DIR/frontend"

@@ -6,7 +6,7 @@
 #   - 单 worker 运行：后端会话(sessions)保存在进程内存中，
 #     多 worker 会导致登录状态不一致，因此这里固定 --workers 1
 #   - 以 www-data 用户运行，便于读写 /opt/smart-quotation/data/
-#   - 监听 127.0.0.1:8085，仅内网由 Nginx 反代（部署脚本会替换端口）
+#   - 监听 127.0.0.1:8008，仅内网由 Nginx 反代（部署脚本会替换端口）
 # ============================================================
 
 [Unit]
@@ -21,8 +21,8 @@ Group=www-data
 # 后端工作目录（app.main 所在目录）
 WorkingDirectory=/opt/smart-quotation/backend
 
-# 启动命令：监听 127.0.0.1:8085，仅内网由 Nginx 反代
-ExecStart=/opt/smart-quotation/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8085 --workers 1
+# 启动命令：监听 127.0.0.1:8008，仅内网由 Nginx 反代
+ExecStart=/opt/smart-quotation/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8008 --workers 1
 
 Restart=always
 RestartSec=3
