@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { message } from 'antd';
-import type { User, LoginRequest, RegisterRequest, CompanyInfoUpdate } from '../types';
+import type { User, LoginRequest, RegisterRequest, CompanyInfoUpdate, CompanyBindRequest } from '../types';
 import * as api from '../services/api';
 import { PageStateContext } from './PageStateContext';
 
@@ -14,6 +14,7 @@ interface AuthContextType {
     register: (data: RegisterRequest) => Promise<void>;
     logout: () => void;
     updateCompanyInfo: (data: CompanyInfoUpdate) => Promise<void>;
+    bindCompany: (data: CompanyBindRequest) => Promise<void>;
     refreshUser: () => Promise<void>;
 }
 
@@ -78,6 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('auth_user', JSON.stringify(updatedUser));
     };
 
+    const bindCompany = async (data: CompanyBindRequest) => {
+        const updatedUser = await api.bindCompany(data);
+        setUser(updatedUser);
+        localStorage.setItem('auth_user', JSON.stringify(updatedUser));
+    };
+
     const refreshUser = async () => {
         try {
             const userData = await api.getCurrentUser();
@@ -103,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             register,
             logout,
             updateCompanyInfo,
+            bindCompany,
             refreshUser,
         }}>
             {children}

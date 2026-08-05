@@ -76,6 +76,55 @@ class MessageParser:
     PRICE_THRESHOLD_TAIL_PATTERN = re.compile(r"(?:代发价|报价|价格|价钱|进货价|进价|成本价|成本|零售价|投标价|集采价|活动价)[在为]?\s*(\d+\.?\d*)\s*(?:元|块)?\s*(以上|以下)")
     # 价格约数查询（支持"300左右"、"500元左右"等）
     PRICE_APPROX_PATTERN = re.compile(r"(?:代发价|报价|价格|价钱|进货价|进价|成本价|成本|零售价|投标价|集采价|活动价)[在为]?\s*(\d+\.?\d*)\s*(?:元|块)?\s*(左右|上下)")
+    # 69码区间
+    BARCODE_RANGE_PATTERN = re.compile(r"69码[在为]?\s*(\d+)\s*[~\-–到至]\s*(\d+)")
+    # 带"69码"前缀的精确条码
+    BARCODE_EXPLICIT_PATTERN = re.compile(r"69码[是为]?\s*(\d{11,13})")
+
+    # 文本段分隔符（用于切分自由文本）
+    SEGMENT_SPLIT_PATTERN = re.compile(r"[。，,；;！？!?\n]+")
+
+    # 已被特定模式识别的查询（用于识别未被消费的自由文本段）
+    _SPECIFIC_QUERY_PATTERNS = [
+        PRICE_RANGE_PATTERN,
+        PRICE_THRESHOLD_HEAD_PATTERN,
+        PRICE_THRESHOLD_TAIL_PATTERN,
+        PRICE_APPROX_PATTERN,
+        PURCHASE_PRICE_RANGE_PATTERN,
+        RETAIL_PRICE_RANGE_PATTERN,
+        BID_PRICE_RANGE_PATTERN,
+        GROUP_PRICE_RANGE_PATTERN,
+        EVENT_PRICE_RANGE_PATTERN,
+        NEGO_PRICE_RANGE_PATTERN,
+        SHIPPING_FEE_RANGE_PATTERN,
+        WEIGHT_RANGE_PATTERN,
+        SALES_PATTERN,
+        DISCOUNT_RATE_PATTERN,
+        DISCOUNT_RATE_THRESHOLD_PATTERN,
+        DISCOUNT_RATE_APPROX_PATTERN,
+        BARCODE_RANGE_PATTERN,
+        BARCODE_EXPLICIT_PATTERN,
+        BARCODE_PURE_PATTERN,
+        MODEL_PATTERN,
+        BRAND_PATTERN,
+        PRODUCT_NAME_PATTERN,
+        CATEGORY_LEVEL1_PATTERN,
+        CATEGORY_LEVEL2_PATTERN,
+        CATEGORY_LEVEL3_PATTERN,
+        CATEGORY_PATTERN,
+        COOPERATION_LEVEL_PATTERN,
+        SUPPLY_STATUS_PATTERN,
+        BOX_SPEC_PATTERN,
+        CERT_3C_PATTERN,
+        RECOMMENDATION_PATTERN,
+        PRICE_UPDATE_PATTERN,
+        SPEC_PATTERN,
+        UNIT_QUERY_PATTERN,
+        GENERAL_SEARCH_PATTERN,
+        SORT_ASC_PATTERN,
+        SORT_DESC_PATTERN,
+        ALL_PATTERN,
+    ]
 
     def parse(self, text: str) -> Dict[str, Any]:
         """解析消息，返回结构化的查询列表"""
@@ -355,7 +404,7 @@ class MessageParser:
                 })
 
         # 4. 提取69码区间
-        barcode_range_match = re.search(r"69码[在为]?\s*(\d+)\s*[~\-–到至]\s*(\d+)", text)
+        barcode_range_match = self.BARCODE_RANGE_PATTERN.search(text)
         if barcode_range_match:
             key = f"barcode_range_{barcode_range_match.group(1)}_{barcode_range_match.group(2)}"
             if key not in found_patterns:
@@ -368,7 +417,7 @@ class MessageParser:
                 })
 
         # 5. 提取带"69码"前缀的精确条码
-        barcode_explicit = re.findall(r"69码[是为]?\s*(\d{11,13})", text)
+        barcode_explicit = self.BARCODE_EXPLICIT_PATTERN.findall(text)
         for bc in barcode_explicit:
             key = f"exact_barcode_{bc}"
             if key not in found_patterns:
@@ -547,15 +596,24 @@ class MessageParser:
         if self.ALL_PATTERN.search(text):
             queries.append({"type": "all_products", "value": "all"})
 
-        # 如果没有识别到任何查询，尝试通用模糊搜索
-        if not queries:
-            gen_matches = self.GENERAL_SEARCH_PATTERN.findall(text)
-            for nm in gen_matches:
-                nm = nm.strip()
-                if nm and len(nm) >= 1:
+        # 24. 自由文本模糊搜索
+        # 先处理通用搜索模式（"查X的"、"找X"、"帮我看看X"等）
+        gen_matches = self.GENERAL_SEARCH_PATTERN.findall(text)
+        for nm in gen_matches:
+            nm = nm.strip()
+            if nm and len(nm) >= 1:
+                key = f"fuzzy_{nm}"
+                if key not in found_patterns:
+                    found_patterns.add(key)
                     queries.append({"type": "fuzzy_search", "value": nm})
-            if not queries and len(text) >= 2:
-                queries.append({"type": "fuzzy_search", "value": text})
+
+        # 再处理未被任何特定模式识别的文本段（如直接输入型号/关键词）
+        # 这样即使用户同时选择了筛选项，输入的关键词也会生效（与筛选条件做 AND 联合查询）
+        for seg in self._find_free_text_segments(text):
+            key = f"fuzzy_{seg}"
+            if key not in found_patterns:
+                found_patterns.add(key)
+                queries.append({"type": "fuzzy_search", "value": seg})
 
         # 提取无法识别的部分（用于提示用户）
         recognized_texts = set()
@@ -567,6 +625,20 @@ class MessageParser:
             "queries": queries,
             "sort_order": "asc" if self.SORT_ASC_PATTERN.search(text) else ("desc" if self.SORT_DESC_PATTERN.search(text) else None),
         }
+
+    def _find_free_text_segments(self, text: str) -> List[str]:
+        """找出未被任何特定查询模式识别的自由文本段（作为模糊搜索关键词）"""
+        segments = self.SEGMENT_SPLIT_PATTERN.split(text)
+        free_segments = []
+        for seg in segments:
+            seg = seg.strip()
+            if not seg or len(seg) < 2:
+                continue
+            # 如果该段匹配任何特定查询模式，说明它已被识别为某个查询条件，跳过
+            if any(p.search(seg) for p in self._SPECIFIC_QUERY_PATTERNS):
+                continue
+            free_segments.append(seg)
+        return free_segments
 
     def _clean_text(self, text: str) -> str:
         """清洗文本"""

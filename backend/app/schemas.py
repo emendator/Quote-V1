@@ -167,119 +167,73 @@ class BatchModelQueryRequest(BaseModel):
     fuzzy: bool = True  # 是否模糊匹配
 
 
-# ========== 平台配置相关 ==========
-
-class PlatformConfigCreate(BaseModel):
-    name: str
-    platform_type: str
-    api_base_url: str = ""
-    api_key: str = ""
-    api_secret: str = ""
-    shop_id: str = ""
-    extra_config: dict = {}
-    is_active: bool = True
-
-
-class PlatformConfigUpdate(BaseModel):
-    name: Optional[str] = None
-    platform_type: Optional[str] = None
-    api_base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
-    shop_id: Optional[str] = None
-    extra_config: Optional[dict] = None
-    is_active: Optional[bool] = None
-
-
-class PlatformConfigResponse(BaseModel):
-    id: int
-    name: str
-    platform_type: str
-    api_base_url: str
-    api_key: str
-    api_secret: str
-    shop_id: str
-    extra_config: dict = {}
-    is_active: bool
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-    @field_serializer("created_at", "updated_at")
-    def serialize_datetime(self, v: Optional[datetime]) -> Optional[str]:
-        if v is None:
-            return None
-        return v.isoformat() + 'Z'
-
-
-# ========== 一键上架相关 ==========
-
-class ListingSubmitRequest(BaseModel):
+class QueryExportRequest(BaseModel):
+    """查询结果导出请求"""
     product_ids: List[int]
-    platform_ids: List[int]
 
 
-class ListingResultItem(BaseModel):
-    product_id: int
-    platform_id: int
-    status: str
-    platform_product_id: str = ""
-    error_message: str = ""
+# ========== 智能方案相关（v2.0 组合方案）==========
 
+class SolutionSlotInput(BaseModel):
+    """结构化方案输入：一个商品信息块"""
+    category: str = ""                   # 三级品类（必填，用户从三级品类列表选择）
+    quantity: int = 1                    # 数量
+    price_op: str = ""                   # 价格限制方式：gt(大于) / lt(小于) / around(左右)
+    price: Optional[float] = None        # 价格限制值
+    discount_op: str = ""                # 折扣率限制方式：gt(大于) / lt(小于) / around(左右)
+    discount: Optional[float] = None     # 折扣率限制值（百分比）
+    price_min: Optional[float] = None    # 价格下限（兼容）
+    price_max: Optional[float] = None    # 价格上限（兼容）
 
-class ListingSubmitResponse(BaseModel):
-    total: int
-    success: int
-    failed: int
-    results: List[ListingResultItem] = []
-
-
-class ListingLogQuery(BaseModel):
-    page: int = 1
-    page_size: int = 20
-    status: Optional[str] = None
-    platform_id: Optional[int] = None
-    product_id: Optional[int] = None
-
-
-class ListingLogResponse(BaseModel):
-    id: int
-    product_id: int
-    product_model: str = ""
-    product_name: str = ""
-    platform_id: int
-    platform_name: str = ""
-    status: str
-    platform_product_id: str = ""
-    error_message: str = ""
-    created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-    @field_serializer("created_at")
-    def serialize_datetime(self, v: Optional[datetime]) -> Optional[str]:
-        if v is None:
-            return None
-        return v.isoformat() + 'Z'
-
-
-class ListingLogDetailResponse(ListingLogResponse):
-    request_data: dict = {}
-    response_data: dict = {}
-
-
-# ========== 智能方案相关 ==========
 
 class SolutionAnalyzeRequest(BaseModel):
-    requirement: str
+    requirement: str = ""
     use_ai: bool = False
-    filters: dict = {}
+    max_solutions: int = 50
+    # 结构化输入（多块输入）：总价 + 总折扣率 + 商品信息块列表
+    total_price: Optional[float] = None
+    total_price_op: str = ""                 # 总价限制方式：gt(大于) / lt(小于) / around(左右)
+    max_discount_rate: Optional[float] = None   # 总折扣率限制值（可选）
+    max_discount_op: str = ""                 # 总折扣率限制方式：gt(大于) / lt(小于) / around(左右)
+    slots: List[SolutionSlotInput] = []
+
+
+class SolutionSlotItem(BaseModel):
+    """组合方案中的单个商品"""
+    product_id: int
+    quick_model: str = ""
+    product_model: str = ""
+    product_name: str = ""
+    brand: str = ""
+    category_level1: str = ""
+    category_level2: str = ""
+    specification: str = ""
+    price: float = 0
+    retail_price: float = 0
+    discount_rate: float = 0
+    quantity: int = 1
+    subtotal: float = 0
+
+
+class SolutionCombination(BaseModel):
+    """一个完整的组合方案"""
+    total_price: float = 0
+    total_quantity: int = 0
+    total_discount_rate: float = 0
+    items: List[SolutionSlotItem] = []
+
+
+class SolutionAnalyzeResult(BaseModel):
+    """组合方案分析结果"""
+    parsed_constraints: dict = {}
+    ai_interpretation: str = ""
+    solutions: List[SolutionCombination] = []
+    total_solutions: int = 0
+    message: str = ""
 
 
 class SolutionCandidate(BaseModel):
+    """兼容旧版（保留，方案购物车仍使用）"""
     id: int
     quick_model: str = ""
     product_model: str = ""
@@ -290,8 +244,6 @@ class SolutionCandidate(BaseModel):
     specification: str = ""
     price: float = 0
     supply_status: str = ""
-
-    # 推荐产品特有字段
     is_recommended: bool = False
     source_company_name: str = ""
     source_role: str = ""
@@ -314,6 +266,12 @@ class SolutionExportRequest(BaseModel):
     plan_id: int
 
 
+class SolutionRecommendedRequest(BaseModel):
+    """推荐方案请求"""
+    requirement: str = Field(..., description="产品组合需求")
+    max_solutions: int = Field(default=50, ge=1, le=500)
+
+
 # ========== 用户认证相关 ==========
 
 class RegisterRequest(BaseModel):
@@ -333,11 +291,15 @@ class UserResponse(BaseModel):
     username: str
     email: str
     role: str
+    company_id: Optional[int] = None
     company_name: str = ""
     contact_person: str = ""
     contact_phone: str = ""
     company_address: str = ""
     is_active: bool = True
+    has_api_key: bool = False
+    total_tokens_used: int = 0
+    expires_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -352,10 +314,30 @@ class LoginResponse(BaseModel):
 
 
 class CompanyInfoUpdate(BaseModel):
-    company_name: str = Field(..., min_length=1, max_length=200)
+    """更新公司联系方式（已绑定公司后使用，公司名称不可修改）"""
     contact_person: Optional[str] = ""
     contact_phone: Optional[str] = ""
     company_address: Optional[str] = ""
+
+
+class CompanyBindRequest(BaseModel):
+    """绑定公司（数据隔离：公司名 + 公司数据库密码）
+
+    mode: join=加入已有公司（所有角色）；create=新注册公司（仅管理员/最高级管理员）
+    """
+    mode: str = Field(..., pattern=r'^(join|create)$', description="join/create")
+    company_name: str = Field(..., min_length=1, max_length=200)
+    company_password: str = Field(..., min_length=6, max_length=64)
+    contact_person: str = ""
+    contact_phone: str = ""
+    company_address: str = ""
+
+
+class CompanyPasswordChangeRequest(BaseModel):
+    """修改公司数据库密码（需提供该公司当前密码；最高级管理员可指定公司名改任意公司）"""
+    old_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6, max_length=64)
+    company_name: str = ""  # 最高级管理员可指定要修改的公司（留空=自己所在公司）；普通管理员只能改自己所在公司
 
 
 class PasswordChangeRequest(BaseModel):
@@ -367,7 +349,8 @@ class PasswordChangeRequest(BaseModel):
 
 class InviteCodeCreateRequest(BaseModel):
     code_type: str = Field(..., pattern=r'^(admin|user)$')
-    expires_in_days: int = Field(default=7, ge=1, le=30)
+    expires_at: str = Field(..., description="过期时间，格式: YYYY-MM-DD HH:mm")
+    company_name: str = Field("", max_length=200, description="（已弃用）邀请码仅决定角色，不再预设公司名，此字段仅作备注")
 
 
 class InviteCodeResponse(BaseModel):
@@ -382,6 +365,7 @@ class InviteCodeResponse(BaseModel):
     used_at: Optional[str] = None
     expires_at: str
     is_used: bool
+    company_name: str = ""            # 邀请码预设的公司名称
     created_at: str
 
     class Config:
@@ -392,6 +376,12 @@ class InviteCodeVerifyResponse(BaseModel):
     valid: bool
     type: Optional[str] = None
     message: str = ""
+    company_name: str = ""
+
+
+class InviteCodeRenewRequest(BaseModel):
+    """续期请求"""
+    expires_at: str = Field(..., description="新的过期时间，格式: YYYY-MM-DD HH:mm")
 
 
 # ========== 推荐产品相关 ==========
@@ -404,7 +394,7 @@ class RecommendedProductRequest(BaseModel):
 
 class RecommendedProduct(BaseModel):
     id: int
-    owner_id: int = 0
+    owner_id: Optional[int] = 0
     quick_model: str = ""
     product_model: str = ""
     product_name: str = ""
@@ -419,6 +409,35 @@ class RecommendedProduct(BaseModel):
     # 推荐产品特有字段
     source_company_name: str = ""  # 来源公司名称
     source_role: str = ""          # 来源角色: super_admin/admin
+
+
+# ========== 列显示配置相关 ==========
+
+class ColumnConfigItem(BaseModel):
+    """单列配置"""
+    key: str
+    label: str = ""
+    visible: bool = True
+    width: int = 120
+    fixed: Optional[str] = None  # 'left' | 'right' | None
+
+
+class ColumnDisplayConfigResponse(BaseModel):
+    """列显示配置响应"""
+    page_type: str
+    columns: List[ColumnConfigItem] = []
+
+
+class ColumnDisplayUpdateRequest(BaseModel):
+    """更新列显示配置请求"""
+    columns: List[ColumnConfigItem]
+
+
+class AvailableColumn(BaseModel):
+    """可用列信息"""
+    key: str
+    default_label: str
+    default_width: int = 120
 
 
 # ========== 通用响应包装 ==========

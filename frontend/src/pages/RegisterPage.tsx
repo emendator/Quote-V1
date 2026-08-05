@@ -10,7 +10,7 @@ const { Title, Text } = Typography;
 const RegisterPage: React.FC = () => {
     const [form] = Form.useForm();
     const [loading, setLoading] = useState(false);
-    const [inviteValid, setInviteValid] = useState<{ valid: boolean; type?: string | null; message: string } | null>(null);
+    const [inviteValid, setInviteValid] = useState<{ valid: boolean; type?: string | null; message: string; company_name?: string } | null>(null);
     const [checkingInvite, setCheckingInvite] = useState(false);
     const { register, user } = useAuth();
     const navigate = useNavigate();
@@ -52,8 +52,8 @@ const RegisterPage: React.FC = () => {
                 email: values.email,
                 invite_code: values.invite_code,
             });
-            message.success('注册成功');
-            // 所有注册用户都需要完善公司信息
+            message.success('注册成功，请完善公司信息（公司名称 + 公司数据库密码）');
+            // 邀请码仅决定角色，公司归属需在「完善公司信息」页填写并绑定
             navigate('/company-info', { replace: true });
         } catch (err: any) {
             message.error(err.message || '注册失败');

@@ -9,18 +9,35 @@ from sqlalchemy import select, func
 
 from app.database import get_db, sync_engine
 from app.models import User, InviteCode, Product, SolutionPlan, SolutionItem
-from app.schemas import ApiResponse, InviteCodeCreateRequest, InviteCodeResponse, InviteCodeVerifyResponse
+from app.schemas import ApiResponse, InviteCodeCreateRequest, InviteCodeResponse, InviteCodeVerifyResponse, InviteCodeRenewRequest
 from app.utils.auth_utils import (
     generate_invite_code,
-    get_current_user,
-    require_super_admin,
-    require_admin_or_above,
+    require_company_admin,
 )
 from sqlalchemy import text
 
 logger = logging.getLogger("invites")
 
 router = APIRouter(prefix="/api/invites", tags=["邀请码管理"])
+
+
+def _parse_dt(value) -> Optional[datetime]:
+    """把数据库读出的时间值（字符串或 datetime）解析为 naive datetime，无法解析返回 None。
+
+    SQLite 中 DATETIME 以文本存储（如 '2026-08-05 16:14:49.188025'），
+    通过原生 text() SQL 读回时是字符串，直接对其调用 .replace(tzinfo=...) 会报错。
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    s = str(value).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _invite_to_response(invite: InviteCode, used_user: Optional[User] = None) -> InviteCodeResponse:
@@ -30,12 +47,13 @@ def _invite_to_response(invite: InviteCode, used_user: Optional[User] = None) ->
         type=invite.type,
         created_by=invite.created_by,
         used_by=invite.used_by,
-        used_by_username=used_user.username if used_user else "",
+        used_by_username=used_user.get_plain_username() if used_user else "",
         used_by_company=used_user.company_name or "" if used_user else "",
         used_by_last_login=used_user.last_login_at.isoformat() if used_user and used_user.last_login_at else None,
         used_at=invite.used_at.isoformat() if invite.used_at else None,
         expires_at=invite.expires_at.isoformat() if invite.expires_at else None,
         is_used=bool(invite.is_used),
+        company_name=invite.company_name or "",
         created_at=invite.created_at.isoformat() if invite.created_at else None,
     )
 
@@ -43,7 +61,7 @@ def _invite_to_response(invite: InviteCode, used_user: Optional[User] = None) ->
 @router.post("/create", response_model=ApiResponse)
 async def create_invite(
     data: InviteCodeCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_company_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """创建邀请码
@@ -59,12 +77,18 @@ async def create_invite(
 
     # 生成邀请码
     code_str = generate_invite_code(data.code_type)
-    now = datetime.now(timezone(timedelta(hours=8)))
+    try:
+        expires_at = datetime.strptime(data.expires_at, "%Y-%m-%d %H:%M")
+        expires_at = expires_at.replace(tzinfo=timezone(timedelta(hours=8)))
+    except ValueError:
+        return ApiResponse(code=400, message="过期时间格式错误，请使用 YYYY-MM-DD HH:mm 格式")
+    
     invite = InviteCode(
         code=code_str,
         type=data.code_type,
         created_by=current_user.id,
-        expires_at=now + timedelta(days=data.expires_in_days),
+        company_name=data.company_name,
+        expires_at=expires_at,
     )
     db.add(invite)
     await db.flush()
@@ -81,7 +105,7 @@ async def list_invites(
     page_size: int = Query(20, ge=1, le=100),
     code_type: str = Query(None, alias="type"),
     status: str = Query(None, alias="status"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_company_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """查看邀请码列表
@@ -150,7 +174,16 @@ async def verify_invite(code: str, db: AsyncSession = Depends(get_db)):
         valid=True,
         type=invite.type,
         message="邀请码有效",
+        company_name=invite.company_name or "",
     ).model_dump())
+
+
+def _safe_delete_owner_rows(conn, table: str, user_id: int):
+    """安全删除某表的 owner_id 行；表不存在时静默跳过（旧版遗留表容错）"""
+    try:
+        conn.execute(text(f"DELETE FROM {table} WHERE owner_id = :uid"), {"uid": user_id})
+    except Exception:
+        pass
 
 
 def _cascade_delete_user(user_id: int, conn=None):
@@ -191,14 +224,23 @@ def _cascade_delete_user(user_id: int, conn=None):
     # 5. 删除该用户的商品
     conn.execute(text("DELETE FROM products WHERE owner_id = :uid"), {"uid": user_id})
 
-    # 6. 删除用户自身
+    # 6. 删除该用户的平台配置（旧版遗留表，可能不存在，需容错）
+    _safe_delete_owner_rows(conn, "platform_configs", user_id)
+
+    # 7. 删除该用户的上架日志（旧版遗留表，可能不存在，需容错）
+    _safe_delete_owner_rows(conn, "listing_logs", user_id)
+
+    # 8. 删除该用户的导入日志
+    conn.execute(text("DELETE FROM import_logs WHERE owner_id = :uid"), {"uid": user_id})
+
+    # 9. 删除用户自身
     conn.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": user_id})
 
 
 @router.delete("/{invite_id}", response_model=ApiResponse)
 async def delete_invite(
     invite_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_company_admin),
 ):
     """删除邀请码（级联删除关联用户及数据）
 
@@ -229,10 +271,22 @@ async def delete_invite(
             if used_by == 1:
                 return ApiResponse(code=400, message="不能删除最高级管理员账号")
 
+            # 只有账号过期后才允许删除
+            if used_by:
+                user_row = conn.execute(
+                    text("SELECT expires_at FROM users WHERE id = :uid"),
+                    {"uid": used_by}
+                ).fetchone()
+                if user_row:
+                    expires_at = _parse_dt(user_row[0])
+                    now = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+                    if expires_at is None or expires_at > now:
+                        return ApiResponse(code=400, message="该账号尚未过期，无法删除；请先续期或等待其过期后再删除")
+
             logger.info(
                 f"级联删除邀请码 #{invite_id} ({invite_code_str}), "
                 f"创建者={created_by}, 使用者={used_by}, "
-                f"由用户 {current_user.username}({current_user.id}) 执行"
+                f"由用户 {current_user.get_plain_username()}({current_user.id}) 执行"
             )
 
             # 先删除邀请码自身（避免递归时重复处理）
@@ -248,3 +302,62 @@ async def delete_invite(
     except Exception as e:
         logger.error(f"删除邀请码失败: {e}", exc_info=True)
         return ApiResponse(code=500, message=f"删除失败: {str(e)}")
+
+
+@router.post("/{invite_id}/renew", response_model=ApiResponse)
+async def renew_invite(
+    invite_id: int,
+    data: InviteCodeRenewRequest,
+    current_user: User = Depends(require_company_admin),
+):
+    """续期邀请码关联的账号（仅管理员以上可操作）
+
+    为已过期的账号设置新的过期时间，使其恢复可用。
+    """
+    if current_user.role not in ("super_admin", "admin"):
+        return ApiResponse(code=403, message="权限不足")
+
+    try:
+        with sync_engine.connect() as conn:
+            # 查询邀请码
+            invite_row = conn.execute(
+                text("SELECT id, created_by, used_by FROM invite_codes WHERE id = :id"),
+                {"id": invite_id}
+            ).fetchone()
+
+            if not invite_row:
+                return ApiResponse(code=404, message="邀请码不存在")
+
+            created_by = invite_row[1]
+            used_by = invite_row[2]
+
+            # 权限校验：管理员只能操作自己创建的邀请码
+            if current_user.role != "super_admin" and created_by != current_user.id:
+                return ApiResponse(code=403, message="无权操作此邀请码")
+
+            if not used_by:
+                return ApiResponse(code=400, message="该邀请码尚未被使用，无关联账号")
+
+            # 解析新的过期时间
+            try:
+                new_expires_at = datetime.strptime(data.expires_at, "%Y-%m-%d %H:%M")
+                new_expires_at = new_expires_at.replace(tzinfo=timezone(timedelta(hours=8)))
+            except ValueError:
+                return ApiResponse(code=400, message="过期时间格式错误，请使用 YYYY-MM-DD HH:mm 格式")
+
+            # 更新用户的过期时间
+            conn.execute(
+                text("UPDATE users SET expires_at = :expires_at WHERE id = :uid"),
+                {"expires_at": new_expires_at, "uid": used_by}
+            )
+            # 同时更新邀请码的过期时间（保持同步）
+            conn.execute(
+                text("UPDATE invite_codes SET expires_at = :expires_at WHERE id = :id"),
+                {"expires_at": new_expires_at, "id": invite_id}
+            )
+            conn.commit()
+
+        return ApiResponse(message=f"账号已续期至 {data.expires_at}")
+    except Exception as e:
+        logger.error(f"续期失败: {e}", exc_info=True)
+        return ApiResponse(code=500, message=f"续期失败: {str(e)}")

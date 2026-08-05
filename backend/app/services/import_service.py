@@ -126,8 +126,8 @@ def _clean_previous_uploads(current_file_path: str):
                     logger.warning(f"清理残留文件失败 {fname}: {e}")
 
 
-def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strategy: str, owner_id: int = 0) -> Dict[str, Any]:
-    """执行数据导入 —— 以快查型号为准去重（数据隔离：绑定 owner_id）"""
+def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strategy: str, company_name: str = "", company_id: int = 0) -> Dict[str, Any]:
+    """执行数据导入 —— 以快查型号为准去重（数据隔离：绑定 company_id / company_name）"""
     if file_id not in _upload_cache:
         raise ValueError("文件已过期，请重新上传")
 
@@ -162,6 +162,10 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
     # ---- 处理从 Excel 提取的图片数据 ----
     if "_excel_image" in df.columns:
         # 将提取的图片数据合并到 image 字段
+        if "image" not in df.columns:
+            df["image"] = None
+        # 确保 image 列为 object 类型（空列可能为 float64，写入 base64 会报类型错误）
+        df["image"] = df["image"].astype(object)
         if "image" not in existing_fields:
             existing_fields.append("image")
         for idx, row in df.iterrows():
@@ -182,6 +186,11 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
         raise ValueError("映射后没有匹配到任何数据库字段，请检查列映射配置")
     existing_fields = existing_fields_in_df
     df = df[existing_fields]
+
+    # 代发价(price) 在数据库为 NOT NULL：未映射时补默认列 0，避免插入时触发 NOT NULL 约束报错
+    if "price" not in existing_fields:
+        existing_fields.append("price")
+        df["price"] = 0
 
     # 确保没有重复列名（防御性检查）
     if len(df.columns) != len(set(df.columns)):
@@ -254,7 +263,7 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                     continue
                 row_data["price"] = price_val
 
-                # 去重检查：快查型号、产品名称、一级品类、二级品类、三级品类、品牌全部相同才算重复
+                # 去重检查：快查型号、产品名称、一级品类、二级品类、三级品类、品牌全部相同且同公司才算重复
                 dup_fields = {
                     "quick_model": quick_model,
                     "product_name": row_data.get("product_name", ""),
@@ -262,6 +271,7 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                     "category_level2": row_data.get("category_level2", ""),
                     "category_level3": row_data.get("category_level3", ""),
                     "brand": row_data.get("brand", ""),
+                    "company_id": company_id,
                 }
                 dup_where = " AND ".join([f"{k}=:{k}" for k in dup_fields])
                 existing = conn.execute(
@@ -275,8 +285,9 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                         skip_details.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}），已跳过"})
                         continue
                     elif duplicate_strategy == "overwrite":
-                        row_data["owner_id"] = owner_id
-                        set_fields = [f for f in existing_fields if f != "id"] + ["owner_id"]
+                        row_data["company_id"] = company_id
+                        row_data["company_name"] = company_name
+                        set_fields = [f for f in existing_fields if f != "id"] + ["company_id", "company_name"]
                         set_clause = ", ".join([f"{f}=:{f}" for f in set_fields])
                         now_beijing = datetime.now(timezone(timedelta(hours=8))).isoformat()
                         conn.execute(
@@ -292,10 +303,11 @@ def execute_import(file_id: str, column_mapping: Dict[str, str], duplicate_strat
                         import_errors.append({"row": int(idx) + 2, "reason": f"重复数据（快查型号={quick_model}，品牌={dup_fields['brand']}）"})
                         continue
 
-                # 插入新记录（绑定 owner_id）
+                # 插入新记录（绑定 company_id / company_name）
                 now_beijing = datetime.now(timezone(timedelta(hours=8))).isoformat()
-                row_data["owner_id"] = owner_id
-                insert_fields = existing_fields + ["owner_id", "created_at", "updated_at"]
+                row_data["company_id"] = company_id
+                row_data["company_name"] = company_name
+                insert_fields = existing_fields + ["company_id", "company_name", "created_at", "updated_at"]
                 insert_placeholders = ", ".join([f":{f}" for f in insert_fields])
                 row_data["created_at"] = now_beijing
                 row_data["updated_at"] = now_beijing

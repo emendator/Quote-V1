@@ -94,6 +94,13 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise credentials_exception
+    # 检查账号是否过期
+    from datetime import datetime, timezone, timedelta
+    if user.expires_at and user.expires_at.replace(tzinfo=None) < datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已过期，无法执行操作",
+        )
     return user
 
 
@@ -119,6 +126,23 @@ async def require_super_admin(current_user: User = Depends(get_current_user)) ->
 
 async def require_admin_or_above(current_user: User = Depends(get_current_user)) -> User:
     """限制管理员及以上可访问"""
+    if current_user.role not in ("super_admin", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足，需要管理员及以上权限")
+    return current_user
+
+
+async def require_company(current_user: User = Depends(get_current_user)) -> User:
+    """限制已完成公司绑定（公司名 + 公司数据库密码）的用户可访问"""
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="请先完善公司信息（公司名称 + 公司数据库密码）",
+        )
+    return current_user
+
+
+async def require_company_admin(current_user: User = Depends(require_company)) -> User:
+    """限制管理员及以上，且已完成公司绑定"""
     if current_user.role not in ("super_admin", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足，需要管理员及以上权限")
     return current_user

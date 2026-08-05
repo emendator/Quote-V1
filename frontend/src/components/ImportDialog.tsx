@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import {
-    Modal, Steps, Upload, Button, Table, Select, Radio,
+    Modal, Steps, Upload, Button, Table, Radio,
     Result, Space, message, Alert, List, Typography, Tooltip,
 } from 'antd';
 import {
@@ -314,16 +314,26 @@ export default function ImportDialog({ open, onClose, onSuccess }: Props) {
                     {importResult.errors.length > 0 && (
                         <div>
                             <h4 style={{ marginTop: 12, marginBottom: 8 }}>详细记录（共 {importResult.errors.length} 条）</h4>
-                            <Table
-                                dataSource={importResult.errors.map((e, i) => ({ key: i, row: e.row, reason: e.reason }))}
-                                columns={[
-                                    { title: '行号', dataIndex: 'row', key: 'row', width: 80 },
-                                    { title: '处理详情', dataIndex: 'reason', key: 'reason' },
-                                ]}
-                                size="small"
-                                pagination={importResult.errors.length > 20 ? { pageSize: 20 } : false}
-                                style={{ marginTop: 8 }}
-                            />
+                            <div style={{ maxHeight: 400, overflow: 'auto' }}>
+                                <Table
+                                    dataSource={importResult.errors.map((e, i) => ({ key: i, row: e.row, reason: e.reason }))}
+                                    columns={[
+                                        { title: '行号', dataIndex: 'row', key: 'row', width: 80 },
+                                        {
+                                            title: '处理详情',
+                                            dataIndex: 'reason',
+                                            key: 'reason',
+                                            width: 500,
+                                            ellipsis: true,
+                                            render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-',
+                                        },
+                                    ]}
+                                    size="small"
+                                    pagination={importResult.errors.length > 20 ? { pageSize: 20 } : false}
+                                    scroll={{ x: 600 }}
+                                    style={{ marginTop: 8 }}
+                                />
+                            </div>
                         </div>
                     )}
                     <div style={{ marginTop: 24, textAlign: 'center' }}>

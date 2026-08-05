@@ -1,20 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Input, Space, message, Select, Slider, Typography } from 'antd';
-import { DownloadOutlined, PlusOutlined, ImportOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, ShoppingCartOutlined } from '@ant-design/icons';
+import { Button, Input, Space, message, Select, Slider, Typography, Tooltip } from 'antd';
+import { DownloadOutlined, PlusOutlined, ImportOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import ProductTable from '../components/ProductTable';
 import ProductForm from '../components/ProductForm';
 import ImportDialog from '../components/ImportDialog';
-import ListingDialog from '../components/ListingDialog';
+import ColumnDisplayConfig from '../components/ColumnDisplayConfig';
 import {
-    fetchProducts, fetchCategories, deleteProduct, batchDeleteProducts, exportProducts,
+    fetchProducts, fetchCategories, deleteProduct, batchDeleteProducts, exportProducts, getColumnDisplayConfig,
+    fetchFilterOptions,
 } from '../services/api';
-import type { Product } from '../types';
+import type { Product, ColumnConfigItem } from '../types';
 import { usePageState } from '../store/PageStateContext';
+import { useAuth } from '../store/AuthContext';
 
 const { Search } = Input;
 const { Text } = Typography;
 
 export default function DataManagePage() {
+    const { isSuperAdmin, isAdmin } = useAuth();
+    const canWrite = isSuperAdmin || isAdmin;  // 是否有增删改权限
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(false);
     const [total, setTotal] = useState(0);
@@ -43,34 +47,62 @@ export default function DataManagePage() {
     // 导入弹窗
     const [importOpen, setImportOpen] = useState(false);
 
-    // 一键上架弹窗
-    const [listingOpen, setListingOpen] = useState(false);
+    // 列显示配置弹窗
+    const [columnConfigOpen, setColumnConfigOpen] = useState(false);
+
+    // 表头下拉筛选状态（类似 Excel 的列筛选）
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+    // 表头下拉筛选可选值（全量数据，从 API 加载）
+    const [filterOptions, setFilterOptions] = useState<Record<string, string[]> | undefined>(undefined);
+
+    // 产品库列显示配置（从 API 加载）
+    const [columnConfig, setColumnConfig] = useState<ColumnConfigItem[] | undefined>(undefined);
 
     // 表格缩放
     const ZOOM_MIN = 50;
     const ZOOM_MAX = 200;
     const ZOOM_STEP = 10;
 
+    const loadColumnConfig = useCallback(async () => {
+        try {
+            const data = await getColumnDisplayConfig('product_db');
+            setColumnConfig(data.columns || []);
+        } catch {
+            // 加载列配置失败时使用默认配置
+            setColumnConfig(undefined);
+        }
+    }, []);
+
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await fetchProducts({
-                page,
-                page_size: pageSize,
-                keyword: keyword || undefined,
-                category,
-                sort_by: sortBy,
-                sort_order: sortOrder,
-            });
+            // 将 columnFilters 转为 JSON 字符串传给后端
+            const filtersStr = Object.keys(columnFilters).length > 0
+                ? JSON.stringify(columnFilters) : undefined;
+            const [data, , opts] = await Promise.all([
+                fetchProducts({
+                    page,
+                    page_size: pageSize,
+                    keyword: keyword || undefined,
+                    category,
+                    sort_by: sortBy,
+                    sort_order: sortOrder,
+                    filters: filtersStr,
+                }),
+                loadColumnConfig(),
+                fetchFilterOptions().catch(() => undefined),
+            ]);
             setProducts(data.items);
             setTotal(data.total);
+            if (opts) setFilterOptions(opts);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : '加载失败';
             message.error(msg);
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize, keyword, category, sortBy, sortOrder]);
+    }, [page, pageSize, keyword, category, sortBy, sortOrder, loadColumnConfig, columnFilters]);
 
     const loadCategories = async () => {
         try {
@@ -192,19 +224,25 @@ export default function DataManagePage() {
                     <Button icon={<DownloadOutlined />} onClick={handleExport}>
                         导出数据
                     </Button>
-                    <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-                        导入数据
-                    </Button>
-                    <Button
-                        icon={<ShoppingCartOutlined />}
-                        onClick={() => setListingOpen(true)}
-                        disabled={selectedKeys.length === 0}
-                    >
-                        一键上架 ({selectedKeys.length})
-                    </Button>
-                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-                        新增商品
-                    </Button>
+                    <Tooltip title="配置产品库表格的列显示和表头名称（管理员以上可配置）">
+                        <Button
+                            icon={<ColumnHeightOutlined />}
+                            onClick={() => setColumnConfigOpen(true)}
+                        >
+                            列配置
+                        </Button>
+                    </Tooltip>
+                    {canWrite && (
+                        <>
+
+                            <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+                                导入数据
+                            </Button>
+                            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+                                新增商品
+                            </Button>
+                        </>
+                    )}
                 </Space>
             </div>
 
@@ -218,6 +256,14 @@ export default function DataManagePage() {
                 zoom={zoom}
                 sortBy={sortBy}
                 sortOrder={sortOrder}
+                columnFilters={columnFilters}
+                onColumnFilter={(filters) => {
+                    setColumnFilters(filters);
+                    updateState({ page: 1 });  // 筛选后回到第一页
+                }}
+                canWrite={canWrite}
+                columnConfig={columnConfig}
+                filterOptions={filterOptions}
                 onPageChange={(p, ps) => {
                     updateState({ page: p, pageSize: ps });
                 }}
@@ -230,24 +276,31 @@ export default function DataManagePage() {
                 onSelectChange={setSelectedKeys}
             />
 
-            <ProductForm
-                open={formOpen}
-                editingProduct={editingProduct}
-                onClose={() => setFormOpen(false)}
-                onSuccess={loadData}
-            />
+            {canWrite && (
+                <>
+                    <ProductForm
+                        open={formOpen}
+                        editingProduct={editingProduct}
+                        onClose={() => setFormOpen(false)}
+                        onSuccess={loadData}
+                    />
+                    <ImportDialog
+                        open={importOpen}
+                        onClose={() => setImportOpen(false)}
+                        onSuccess={loadData}
+                    />
+                </>
+            )}
 
-            <ImportDialog
-                open={importOpen}
-                onClose={() => setImportOpen(false)}
-                onSuccess={loadData}
-            />
-
-            <ListingDialog
-                open={listingOpen}
-                selectedProductIds={selectedKeys}
-                onClose={() => setListingOpen(false)}
-                onSuccess={loadData}
+            <ColumnDisplayConfig
+                open={columnConfigOpen}
+                pageType="product_db"
+                title="产品库列显示配置"
+                onClose={() => setColumnConfigOpen(false)}
+                onSaved={() => {
+                    loadData();
+                    loadColumnConfig();
+                }}
             />
         </div>
     );

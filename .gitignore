@@ -20,9 +20,10 @@ env/
 *.swo
 *~
 
-# Project - database & temporary files
+# Project - runtime data（数据库 + 上传文件，删除后应用启动会自动重建）
+data/
 *.db
-backend/uploads/
+*.sqlite3
 *.xlsx
 !frontend/src/**/*.xlsx
 
@@ -33,10 +34,6 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
-
-# Database
-*.db
-*.sqlite3
 
 # Backend uploads (user data & images)
 backend/uploads/

@@ -33,14 +33,18 @@ def _user_to_response(user: User) -> UserResponse:
     """将 User ORM 对象转换为 UserResponse"""
     return UserResponse(
         id=user.id,
-        username=user.username,
+        username=user.get_plain_username(),
         email=user.email,
         role=user.role,
+        company_id=user.company_id,
         company_name=user.company_name or "",
         contact_person=user.contact_person or "",
         contact_phone=user.contact_phone or "",
         company_address=user.company_address or "",
         is_active=bool(user.is_active),
+        has_api_key=bool(user.api_key),
+        total_tokens_used=user.total_tokens_used or 0,
+        expires_at=user.expires_at.isoformat() if user.expires_at else None,
         created_at=user.created_at.isoformat() if user.created_at else None,
         updated_at=user.updated_at.isoformat() if user.updated_at else None,
     )
@@ -49,8 +53,9 @@ def _user_to_response(user: User) -> UserResponse:
 @router.post("/register", response_model=ApiResponse)
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """用户注册（需提供邀请码）"""
-    # 1. 检查用户名是否已存在
-    result = await db.execute(select(User).where(User.username == data.username))
+    # 1. 检查用户名是否已存在（通过 username_hash 等值查询）
+    from app.utils.crypto_utils import hash_username, encrypt_username
+    result = await db.execute(select(User).where(User.username_hash == hash_username(data.username)))
     if result.scalar_one_or_none():
         return ApiResponse(code=400, message="用户名已存在")
 
@@ -65,16 +70,16 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if invite.expires_at.replace(tzinfo=None) < datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None):
         return ApiResponse(code=400, message="邀请码已过期")
 
-    # 3. 根据邀请码类型确定角色
+    # 3. 根据邀请码类型确定角色（邀请码仅决定角色，不再预设公司名）
     role = "admin" if invite.type == "admin" else "user"
 
-    # 4. 创建用户
     user = User(
-        username=data.username,
+        username=encrypt_username(data.username),
+        username_hash=hash_username(data.username),
         password_hash=hash_password(data.password),
         email=data.email,
         role=role,
-        company_name="",
+        expires_at=invite.expires_at,  # 继承邀请码的过期时间
     )
     db.add(user)
     await db.flush()  # 获取 user.id
@@ -88,7 +93,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     # 6. 生成 JWT Token
     access_token = create_access_token(data={
         "sub": str(user.id),
-        "username": user.username,
+        "username": user.get_plain_username(),
         "role": user.role,
         "company_name": user.company_name or "",
     })
@@ -106,14 +111,17 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/login", response_model=ApiResponse)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     """用户登录"""
-    # 1. 查询用户
-    result = await db.execute(select(User).where(User.username == data.username))
+    # 1. 查询用户（通过 username_hash 等值查询）
+    from app.utils.crypto_utils import hash_username
+    result = await db.execute(select(User).where(User.username_hash == hash_username(data.username)))
     user = result.scalar_one_or_none()
 
     if not user:
         return ApiResponse(code=401, message="用户名或密码错误")
     if not user.is_active:
         return ApiResponse(code=401, message="账号已被禁用")
+    if user.expires_at and user.expires_at.replace(tzinfo=None) < datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None):
+        return ApiResponse(code=401, message="账号已过期，已禁止登录，请联系管理员续期")
 
     # 2. 验证密码
     if not verify_password(data.password, user.password_hash):
@@ -125,7 +133,7 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     # 4. 生成 JWT Token
     access_token = create_access_token(data={
         "sub": str(user.id),
-        "username": user.username,
+        "username": user.get_plain_username(),
         "role": user.role,
         "company_name": user.company_name or "",
     })
@@ -152,8 +160,7 @@ async def update_company(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """完善公司信息（管理员注册后必填）"""
-    current_user.company_name = data.company_name
+    """更新公司联系方式（公司归属通过 /api/company/bind 绑定，此处仅更新联系人信息）"""
     current_user.contact_person = data.contact_person or ""
     current_user.contact_phone = data.contact_phone or ""
     current_user.company_address = data.company_address or ""
@@ -163,6 +170,36 @@ async def update_company(
         data=_user_to_response(current_user).model_dump(),
         message="公司信息更新成功",
     )
+
+
+@router.put("/me/apikey", response_model=ApiResponse)
+async def update_api_key(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """保存当前用户的 DeepSeek API Key（加密存储）"""
+    api_key = data.get("api_key", "").strip()
+    if not api_key:
+        return ApiResponse(code=400, message="API Key 不能为空")
+
+    from app.utils.crypto_utils import encrypt_api_key
+    encrypted = encrypt_api_key(api_key)
+    current_user.api_key = encrypted
+    await db.flush()
+
+    return ApiResponse(message="API Key 已保存（加密存储）")
+
+
+@router.get("/me/apikey/status", response_model=ApiResponse)
+async def get_api_key_status(
+    current_user: User = Depends(get_current_user),
+):
+    """查看当前用户 API Key 配置状态"""
+    return ApiResponse(data={
+        "has_api_key": bool(current_user.api_key),
+        "total_tokens_used": current_user.total_tokens_used or 0,
+    })
 
 
 @router.put("/me/password", response_model=ApiResponse)

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, Card, Tag, Modal, Form, Select, InputNumber, message, Space, Typography, Tooltip, Alert } from 'antd';
-import { PlusOutlined, CopyOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, DeleteOutlined, WarningOutlined } from '@ant-design/icons';
+import { Table, Button, Card, Tag, Modal, Form, Select, Input, DatePicker, message, Space, Typography, Tooltip, Alert } from 'antd';
+import { PlusOutlined, CopyOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, DeleteOutlined, WarningOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useAuth } from '../store/AuthContext';
-import { getInviteCodes, createInviteCode, deleteInviteCode } from '../services/api';
+import { getInviteCodes, createInviteCode, deleteInviteCode, renewInviteCode } from '../services/api';
 import type { InviteCode } from '../types';
 
 const { Title, Text } = Typography;
@@ -16,6 +16,12 @@ const InviteCodePage: React.FC = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [createLoading, setCreateLoading] = useState(false);
     const [form] = Form.useForm();
+
+    // 续期弹窗
+    const [renewModalOpen, setRenewModalOpen] = useState(false);
+    const [renewTarget, setRenewTarget] = useState<InviteCode | null>(null);
+    const [renewLoading, setRenewLoading] = useState(false);
+    const [renewForm] = Form.useForm();
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -34,10 +40,16 @@ const InviteCodePage: React.FC = () => {
         fetchData();
     }, [fetchData]);
 
-    const handleCreate = async (values: { code_type: string; expires_in_days: number }) => {
+    const handleCreate = async (values: { code_type: string; expires_at: any }) => {
         setCreateLoading(true);
         try {
-            const result = await createInviteCode(values);
+            // 将 moment 对象格式化为 YYYY-MM-DD HH:mm
+            const expiresAtStr = values.expires_at.format('YYYY-MM-DD HH:mm');
+            const result = await createInviteCode({
+                code_type: values.code_type,
+                expires_at: expiresAtStr,
+                company_name: '',
+            });
             message.success('邀请码创建成功');
             setModalOpen(false);
             form.resetFields();
@@ -93,7 +105,28 @@ const InviteCodePage: React.FC = () => {
             },
         });
     };
+    const handleRenew = async (values: { expires_at: any }) => {
+        if (!renewTarget) return;
+        setRenewLoading(true);
+        try {
+            const expiresAtStr = values.expires_at.format('YYYY-MM-DD HH:mm');
+            await renewInviteCode(renewTarget.id, expiresAtStr);
+            message.success(`账号已续期至 ${expiresAtStr}`);
+            setRenewModalOpen(false);
+            renewForm.resetFields();
+            fetchData();
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : '续期失败';
+            message.error(msg);
+        } finally {
+            setRenewLoading(false);
+        }
+    };
 
+    const openRenewModal = (record: InviteCode) => {
+        setRenewTarget(record);
+        setRenewModalOpen(true);
+    };
     const copyToClipboard = async (code: string) => {
         try {
             await navigator.clipboard.writeText(code);
@@ -104,11 +137,14 @@ const InviteCodePage: React.FC = () => {
     };
 
     const getStatusTag = (record: InviteCode) => {
-        if (record.is_used) {
-            return <Tag icon={<CheckCircleOutlined />} color="default">已使用</Tag>;
-        }
         const now = new Date();
         const expires = new Date(record.expires_at);
+        if (record.is_used) {
+            if (expires < now) {
+                return <Tag icon={<CloseCircleOutlined />} color="error">已过期</Tag>;
+            }
+            return <Tag icon={<CheckCircleOutlined />} color="success">有效</Tag>;
+        }
         if (expires < now) {
             return <Tag icon={<CloseCircleOutlined />} color="error">已过期</Tag>;
         }
@@ -129,6 +165,7 @@ const InviteCodePage: React.FC = () => {
             title: '邀请码',
             dataIndex: 'code',
             key: 'code',
+            width: 180,
             render: (code: string) => (
                 <Space>
                     <span style={{ fontFamily: 'monospace', fontSize: 13 }}>{code}</span>
@@ -142,19 +179,26 @@ const InviteCodePage: React.FC = () => {
             title: '类型',
             dataIndex: 'type',
             key: 'type',
-            width: 80,
+            width: 60,
             render: (type: string) => type === 'admin' ? <Tag color="blue">管理员</Tag> : <Tag color="green">用户</Tag>,
+        },
+        {
+            title: '备注',
+            dataIndex: 'company_name',
+            key: 'company_name',
+            width: 200,
+            render: (v: string) => v || <span style={{ color: '#ccc' }}>-</span>,
         },
         {
             title: '状态',
             key: 'status',
-            width: 80,
+            width: 60,
             render: (_: any, record: InviteCode) => getStatusTag(record),
         },
         {
             title: '使用者',
             key: 'used_user',
-            width: 150,
+            width: 120,
             render: (_: any, record: InviteCode) => {
                 if (!record.is_used || !record.used_by_username) return <span style={{ color: '#999' }}>-</span>;
                 return (
@@ -171,43 +215,51 @@ const InviteCodePage: React.FC = () => {
             title: '最后登录',
             dataIndex: 'used_by_last_login',
             key: 'used_by_last_login',
-            width: 160,
-            render: (v: string | null) => formatTime(v),
-        },
-        {
-            title: '使用时间',
-            dataIndex: 'used_at',
-            key: 'used_at',
-            width: 160,
+            width: 130,
             render: (v: string | null) => formatTime(v),
         },
         {
             title: '过期时间',
             dataIndex: 'expires_at',
             key: 'expires_at',
-            width: 160,
+            width: 130,
             render: (v: string) => formatTime(v),
         },
         {
             title: '创建时间',
             dataIndex: 'created_at',
             key: 'created_at',
-            width: 160,
+            width: 130,
             render: (v: string) => formatTime(v),
         },
         {
             title: '操作',
             key: 'action',
-            width: 70,
-            render: (_: unknown, record: InviteCode) => (
-                <Button
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDelete(record)}
-                />
-            ),
+            width: 120,
+            render: (_: unknown, record: InviteCode) => {
+                const isExpired = record.is_used && record.expires_at && new Date(record.expires_at) < new Date();
+                return (
+                    <Space>
+                        {isExpired && (
+                            <Button
+                                type="link"
+                                size="small"
+                                icon={<ReloadOutlined />}
+                                onClick={() => openRenewModal(record)}
+                            >
+                                续期
+                            </Button>
+                        )}
+                        <Button
+                            type="link"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => handleDelete(record)}
+                        />
+                    </Space>
+                );
+            },
         },
     ];
 
@@ -220,7 +272,7 @@ const InviteCodePage: React.FC = () => {
         <div style={{ padding: 24 }}>
             <Card>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Title level={4} style={{ margin: 0 }}>邀请码管理</Title>
+                    <Title level={4} style={{ margin: 0 }}>用户管理</Title>
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
                         创建邀请码
                     </Button>
@@ -252,7 +304,7 @@ const InviteCodePage: React.FC = () => {
                     form={form}
                     layout="vertical"
                     onFinish={handleCreate}
-                    initialValues={{ code_type: 'user', expires_in_days: 7 }}
+                    initialValues={{ code_type: 'user' }}
                 >
                     <Form.Item
                         name="code_type"
@@ -268,11 +320,16 @@ const InviteCodePage: React.FC = () => {
                     </Form.Item>
 
                     <Form.Item
-                        name="expires_in_days"
-                        label="有效天数"
-                        rules={[{ required: true, message: '请设置有效天数' }]}
+                        name="expires_at"
+                        label="过期时间"
+                        rules={[{ required: true, message: '请选择过期时间' }]}
+                        extra="账号在此时间之前有效，过期后禁止登录"
                     >
-                        <InputNumber min={1} max={30} style={{ width: '100%' }} />
+                        <DatePicker
+                            showTime={{ format: 'HH:mm' }}
+                            format="YYYY-MM-DD HH:mm"
+                            style={{ width: '100%' }}
+                        />
                     </Form.Item>
 
                     <Form.Item>
@@ -280,6 +337,43 @@ const InviteCodePage: React.FC = () => {
                             <Button onClick={() => setModalOpen(false)}>取消</Button>
                             <Button type="primary" htmlType="submit" loading={createLoading}>
                                 创建
+                            </Button>
+                        </Space>
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            {/* 续期弹窗 */}
+            <Modal
+                title={`续期 - ${renewTarget?.used_by_username || ''}`}
+                open={renewModalOpen}
+                onCancel={() => setRenewModalOpen(false)}
+                footer={null}
+                destroyOnClose
+            >
+                <Form
+                    form={renewForm}
+                    layout="vertical"
+                    onFinish={handleRenew}
+                >
+                    <Form.Item
+                        name="expires_at"
+                        label="新的过期时间"
+                        rules={[{ required: true, message: '请选择新的过期时间' }]}
+                        extra="设置后该账号可继续使用至此时间"
+                    >
+                        <DatePicker
+                            showTime={{ format: 'HH:mm' }}
+                            format="YYYY-MM-DD HH:mm"
+                            style={{ width: '100%' }}
+                        />
+                    </Form.Item>
+
+                    <Form.Item>
+                        <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                            <Button onClick={() => setRenewModalOpen(false)}>取消</Button>
+                            <Button type="primary" htmlType="submit" loading={renewLoading}>
+                                确认续期
                             </Button>
                         </Space>
                     </Form.Item>

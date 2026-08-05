@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Modal, Form, Input, InputNumber, Select, message } from 'antd';
+import { Modal, Form, Input, InputNumber, message } from 'antd';
 import type { Product } from '../types';
 import { createProduct, updateProduct } from '../services/api';
 

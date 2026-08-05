@@ -15,31 +15,67 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="用户ID")
-    username = Column(String(50), unique=True, nullable=False, index=True, comment="用户名")
+    username = Column(String(512), nullable=False, comment="用户名(加密存储)")
+    username_hash = Column(String(64), unique=True, index=True, nullable=False, default="", comment="用户名HMAC(用于唯一校验与查询)")
     password_hash = Column(String(256), nullable=False, comment="密码哈希(bcrypt)")
     email = Column(String(200), nullable=False, comment="邮箱")
     role = Column(String(20), nullable=False, default="user", comment="角色: super_admin/admin/user")
     company_name = Column(String(200), default="", comment="公司名称")
+    company_id = Column(Integer, nullable=True, default=None, index=True, comment="所属公司ID(数据隔离)")
     contact_person = Column(String(100), default="", comment="联系人")
     contact_phone = Column(String(50), default="", comment="联系电话")
     company_address = Column(String(500), default="", comment="公司地址")
     is_active = Column(Integer, default=1, comment="是否启用(1是/0否)")
+    api_key = Column(String(500), default="", comment="DeepSeek API Key（加密存储）")
+    total_tokens_used = Column(Integer, default=0, comment="累计消耗的 token 总数")
+    expires_at = Column(DateTime, nullable=True, default=None, comment="账号过期时间(过期后禁止操作，仅可删除)")
     last_login_at = Column(DateTime, nullable=True, default=None, comment="最后登录时间")
+    created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
+    updated_at = Column(DateTime, default=beijing_now, onupdate=beijing_now, comment="更新时间(北京时间)")
+
+    def get_plain_username(self) -> str:
+        """解密返回明文用户名（数据库中以密文存储）"""
+        from app.utils.crypto_utils import decrypt_username
+        username_value: str = self.username  # type: ignore[assignment]
+        return decrypt_username(username_value)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "username": self.get_plain_username(),
+            "email": self.email,
+            "role": self.role,
+            "company_id": self.company_id,
+            "company_name": self.company_name or "",
+            "contact_person": self.contact_person or "",
+            "contact_phone": self.contact_phone or "",
+            "company_address": self.company_address or "",
+            "is_active": bool(self.is_active),
+            "has_api_key": bool(self.api_key),
+            "total_tokens_used": self.total_tokens_used or 0,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Company(Base):
+    """公司表：公司名(唯一) + 公司数据库密码"""
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="公司ID")
+    company_name = Column(String(200), unique=True, nullable=False, index=True, comment="公司名称(唯一，创建后不可修改)")
+    password_hash = Column(String(256), nullable=False, comment="公司数据库密码哈希(bcrypt)")
+    created_by = Column(Integer, nullable=True, default=0, comment="创建者用户ID(管理员)")
     created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
     updated_at = Column(DateTime, default=beijing_now, onupdate=beijing_now, comment="更新时间(北京时间)")
 
     def to_dict(self):
         return {
             "id": self.id,
-            "username": self.username,
-            "email": self.email,
-            "role": self.role,
-            "company_name": self.company_name or "",
-            "contact_person": self.contact_person or "",
-            "contact_phone": self.contact_phone or "",
-            "company_address": self.company_address or "",
-            "is_active": bool(self.is_active),
-            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+            "company_name": self.company_name,
+            "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -57,6 +93,7 @@ class InviteCode(Base):
     used_at = Column(DateTime, nullable=True, default=None, comment="使用时间")
     expires_at = Column(DateTime, nullable=False, comment="过期时间")
     is_used = Column(Integer, default=0, comment="是否已使用(0否/1是)")
+    company_name = Column(String(200), default="", comment="备注（邀请码仅决定角色，不再预设公司名）")
     created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
 
     def to_dict(self):
@@ -69,6 +106,7 @@ class InviteCode(Base):
             "used_at": self.used_at.isoformat() if self.used_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "is_used": bool(self.is_used),
+            "company_name": self.company_name or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -78,7 +116,9 @@ class Product(Base):
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
-    owner_id = Column(Integer, nullable=False, default=0, index=True, comment="所属用户ID(数据隔离)")
+    company_name = Column(String(200), nullable=False, default="", index=True, comment="所属公司名称(数据隔离)")
+    company_id = Column(Integer, nullable=True, default=0, index=True, comment="所属公司ID(数据隔离)")
+    owner_id = Column(Integer, nullable=True, default=0, index=True, comment="所属用户ID(兼容保留)")
     quick_model = Column(String(500), nullable=False, default="", index=True, comment="快查型号(必填)")
     product_model = Column(String(500), nullable=True, default="", index=True, comment="型号")
     product_name = Column(String(500), default="", comment="产品名称")
@@ -121,6 +161,7 @@ class Product(Base):
     def to_dict(self):
         return {
             "id": self.id,
+            "company_name": self.company_name or "",
             "owner_id": self.owner_id,
             "quick_model": self.quick_model,
             "product_model": self.product_model,
@@ -158,6 +199,28 @@ class Product(Base):
         }
 
 
+class ColumnDisplayConfig(Base):
+    """列显示配置表（v2.0 新增）"""
+    __tablename__ = "column_display_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
+    user_id = Column(Integer, nullable=False, comment="用户ID")
+    page_type = Column(String(50), nullable=False, comment="页面类型: product_db / query_result / batch_query")
+    config_json = Column(Text, nullable=False, default="[]", comment="列配置JSON")
+    created_at = Column(DateTime, default=beijing_now, comment="创建时间(北京时间)")
+    updated_at = Column(DateTime, default=beijing_now, onupdate=beijing_now, comment="更新时间(北京时间)")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "page_type": self.page_type,
+            "columns": json.loads(self.config_json) if self.config_json else [],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ImportTemplate(Base):
     """导入列映射模板"""
     __tablename__ = "import_templates"
@@ -179,71 +242,13 @@ class ImportLog(Base):
     skip_rows = Column(Integer, default=0, comment="跳过行数")
     error_rows = Column(Integer, default=0, comment="失败行数")
     error_detail = Column(Text, default="", comment="错误详情JSON")
+    owner_id = Column(Integer, nullable=True, default=0, comment="所属用户ID")
+    company_id = Column(Integer, nullable=True, default=0, index=True, comment="所属公司ID(数据隔离)")
+    company_name = Column(String(200), default="", comment="所属公司名称")
     created_at = Column(DateTime, default=func.now(), comment="创建时间")
 
 
-class PlatformConfig(Base):
-    """平台配置"""
-    __tablename__ = "platform_configs"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
-    name = Column(String(200), nullable=False, comment="平台名称")
-    platform_type = Column(String(50), nullable=False, comment="平台类型(taobao/jd/pdd/...)")
-    api_base_url = Column(String(500), nullable=False, default="", comment="API基础地址")
-    api_key = Column(String(500), default="", comment="API密钥")
-    api_secret = Column(String(500), default="", comment="API密钥Secret")
-    shop_id = Column(String(200), default="", comment="店铺ID")
-    extra_config = Column(Text, default="{}", comment="额外配置JSON")
-    is_active = Column(Integer, default=1, comment="是否启用(1是/0否)")
-    created_at = Column(DateTime, default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment="更新时间")
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "name": self.name,
-            "platform_type": self.platform_type,
-            "api_base_url": self.api_base_url,
-            "api_key": "******" if self.api_key else "",
-            "api_secret": "******" if self.api_secret else "",
-            "shop_id": self.shop_id,
-            "extra_config": json.loads(self.extra_config) if self.extra_config else {},
-            "is_active": bool(self.is_active),
-            "created_at": (self.created_at.isoformat() + 'Z') if self.created_at else None,
-            "updated_at": (self.updated_at.isoformat() + 'Z') if self.updated_at else None,
-        }
-
-
-class ListingLog(Base):
-    """上架日志"""
-    __tablename__ = "listing_logs"
-
-    id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
-    product_id = Column(Integer, nullable=False, comment="商品ID")
-    product_model = Column(String(500), default="", comment="商品型号(冗余)")
-    product_name = Column(String(500), default="", comment="商品名称(冗余)")
-    platform_id = Column(Integer, nullable=False, comment="平台配置ID")
-    platform_name = Column(String(200), default="", comment="平台名称(冗余)")
-    status = Column(String(20), nullable=False, default="pending", comment="状态: pending/success/failed")
-    platform_product_id = Column(String(200), default="", comment="平台商品ID")
-    request_data = Column(Text, default="{}", comment="请求数据JSON")
-    response_data = Column(Text, default="{}", comment="响应数据JSON")
-    error_message = Column(Text, default="", comment="错误信息")
-    created_at = Column(DateTime, default=func.now(), comment="创建时间")
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "product_id": self.product_id,
-            "product_model": self.product_model,
-            "product_name": self.product_name,
-            "platform_id": self.platform_id,
-            "platform_name": self.platform_name,
-            "status": self.status,
-            "platform_product_id": self.platform_product_id,
-            "error_message": self.error_message,
-            "created_at": (self.created_at.isoformat() + 'Z') if self.created_at else None,
-        }
 
 
 class SolutionPlan(Base):
@@ -251,6 +256,8 @@ class SolutionPlan(Base):
     __tablename__ = "solution_plans"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="序号(自增)")
+    company_name = Column(String(200), nullable=False, default="", index=True, comment="所属公司名称(数据隔离)")
+    company_id = Column(Integer, nullable=True, default=0, index=True, comment="所属公司ID(数据隔离)")
     owner_id = Column(Integer, nullable=False, default=0, index=True, comment="所属用户ID")
     name = Column(String(200), default="", comment="方案名称")
     requirement = Column(Text, default="", comment="客户原始需求文本")
@@ -286,8 +293,12 @@ class SolutionItem(Base):
     product_model = Column(String(500), default="", comment="商品型号(冗余)")
     product_name = Column(String(500), default="", comment="商品名称(冗余)")
     brand = Column(String(200), default="", comment="品牌(冗余)")
+    category_level1 = Column(String(200), default="", comment="一级品类(冗余)")
+    category_level2 = Column(String(200), default="", comment="二级品类(冗余)")
     specification = Column(String(500), default="", comment="规格(冗余)")
     price = Column(Float, default=0, comment="代发价(冗余)")
+    retail_price = Column(Float, nullable=True, default=0, comment="零售价(冗余)")
+    image = Column(Text, default="", comment="产品图片Base64(冗余)")
     quantity = Column(Integer, default=1, comment="数量")
     subtotal = Column(Float, nullable=True, default=0, comment="小计 = price × quantity")
     remark = Column(Text, default="", comment="行备注")
@@ -302,8 +313,12 @@ class SolutionItem(Base):
             "product_model": self.product_model,
             "product_name": self.product_name,
             "brand": self.brand,
+            "category_level1": self.category_level1,
+            "category_level2": self.category_level2,
             "specification": self.specification,
             "price": self.price,
+            "retail_price": self.retail_price,
+            "image": self.image,
             "quantity": self.quantity,
             "subtotal": self.subtotal,
             "remark": self.remark,

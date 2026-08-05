@@ -1,171 +1,432 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Input, Button, Select, Row, Col, Divider, message, Table, Space, Switch, Tooltip, Modal, InputNumber, Typography, Alert, Card, Tag } from 'antd';
-import { SearchOutlined, ThunderboltOutlined, ThunderboltFilled, DeleteOutlined, DownloadOutlined, SaveOutlined, ShoppingCartOutlined, FileTextOutlined, HistoryOutlined, ShopOutlined, WarningOutlined } from '@ant-design/icons';
-import { analyzeSolution, saveSolution, exportSolution, listSolutions, getSolutionDetail, deleteSolution, fetchProductsByIds, fetchCategories, fetchBrands, fetchCategoryLevel2, fetchCategoryLevel3 } from '../services/api';
-import type { Product, SolutionCandidate, SolutionAnalyzeResult, SolutionItemData } from '../types';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Input, InputNumber, Row, Col, Divider, message, Table, Space, Tooltip, Modal, Typography, Alert, Card, Tag, Button, Select, Switch } from 'antd';
+import { PlusOutlined, MinusCircleOutlined, DownloadOutlined, SaveOutlined, ShoppingCartOutlined, FileTextOutlined, HistoryOutlined, CheckCircleOutlined, SearchOutlined, DeleteOutlined, ColumnHeightOutlined, ShopOutlined, CloseCircleOutlined, ThunderboltFilled, DownOutlined, RightOutlined, RobotOutlined, BulbOutlined, RocketOutlined } from '@ant-design/icons';
+import { analyzeSolution, saveSolution, exportSolution, listSolutions, getSolutionDetail, deleteSolution, getColumnDisplayConfig, getRecommendedProducts, getRecommendedSolutions, fetchCategoryLevel3 } from '../services/api';
+import type { SolutionAnalyzeResult, SolutionItemData, SolutionCombination, SolutionSlotItem, SolutionSlotInput, SolutionDiagnosis, ColumnConfigItem, RecommendedProduct } from '../types';
 import { usePageState } from '../store/PageStateContext';
+import { useAuth } from '../store/AuthContext';
+import ColumnDisplayConfig from '../components/ColumnDisplayConfig';
 
-const { TextArea } = Input;
 const { Text, Title } = Typography;
 
-// 价格档位选项（与智能查询页一致）
-const PRICE_RANGES = [
-    { label: '全部', query: '' },
-    { label: '≤ 50', query: '价格在0到50' },
-    { label: '50 - 100', query: '价格在50到100' },
-    { label: '100 - 200', query: '价格在100到200' },
-    { label: '200 - 300', query: '价格在200到300' },
-    { label: '300 - 400', query: '价格在300到400' },
-    { label: '400 - 500', query: '价格在400到500' },
-    { label: '500 - 600', query: '价格在500到600' },
-    { label: '600 - 700', query: '价格在600到700' },
-    { label: '700 - 800', query: '价格在700到800' },
-    { label: '800 - 900', query: '价格在800到900' },
-    { label: '900 - 1000', query: '价格在900到1000' },
-    { label: '≥ 1000', query: '价格在1000到999999' },
-];
+/** 从结构化输入生成需求摘要文本（用于推荐/保存） */
+function buildRequirementSummary(
+    total: number | null | undefined,
+    totalDiscount: number | null | undefined,
+    slotList: SolutionSlotInput[],
+    totalOp: 'gt' | 'lt' | 'around' | '' = 'lt',
+    totalDiscountOp: 'gt' | 'lt' | 'around' | '' = 'lt',
+): string {
+    const parts: string[] = [];
+    if (total && total > 0) {
+        const op = totalOp || 'lt';
+        parts.push(op === 'gt' ? `总价≥${total}元` : op === 'around' ? `总价${total}元左右` : `总价≤${total}元`);
+    }
+    if (totalDiscount != null && totalDiscount > 0 && totalDiscountOp) {
+        const op = totalDiscountOp;
+        parts.push(op === 'gt' ? `总折扣率≥${totalDiscount}%` : op === 'around' ? `总折扣率${totalDiscount}%左右` : `总折扣率≤${totalDiscount}%`);
+    }
+    slotList.forEach(s => {
+        const cat = s.category?.trim();
+        const qty = Math.max(1, s.quantity || 1);
+        let priceTxt = '';
+        const val = s.price;
+        const op = s.price_op || '';
+        if (val != null && op) {
+            if (op === 'gt') priceTxt = `（＞${val}元）`;
+            else if (op === 'lt') priceTxt = `（＜${val}元）`;
+            else if (op === 'around') priceTxt = `（${val}元左右）`;
+        }
+        let discountTxt = '';
+        const dval = s.discount;
+        const dop = s.discount_op || '';
+        if (dval != null && dop) {
+            if (dop === 'gt') discountTxt = `（折扣率＞${dval}%）`;
+            else if (dop === 'lt') discountTxt = `（折扣率＜${dval}%）`;
+            else if (dop === 'around') discountTxt = `（折扣率${dval}%左右）`;
+        }
+        parts.push(`${cat || '任意商品'}×${qty}${priceTxt}${discountTxt}`);
+    });
+    return parts.join('，');
+}
 
 export default function SolutionPage() {
+    const { user } = useAuth();
     const [loading, setLoading] = useState(false);
+    // 方案排序：'smart' 智能（贴近用户输入，默认）| 'asc' 升序 | 'desc' 降序
+    const [sortOrder, setSortOrder] = useState<'smart' | 'asc' | 'desc'>('smart');
 
-    // ====== 持久化状态：切换页面后保留 ======
+    // ====== 持久化状态 ======
     const [pageState, setPageState] = usePageState('solution', {
-        requirement: '',
-        useAI: false,
+        requirement: '',            // 需求摘要（由结构化输入生成）
+        useAI: false,               // AI 模式开关
+        aiMode: false,              // 输入方式：false=多块输入, true=AI 智能输入
+        aiText: '',                 // AI 模式的自然语言需求
+        totalPrice: null as number | null,        // 总价（必填）
+        totalPriceOp: 'lt' as 'gt' | 'lt' | 'around',   // 总价限制方式（默认小于）
+        totalDiscount: null as number | null,     // 总折扣率（可选）
+        totalDiscountOp: 'lt' as '' | 'gt' | 'lt' | 'around', // 总折扣率限制方式（默认小于，可选不限）
+        slotsOpen: true,                          // 商品信息整个区块是否展开
+        previewItemsOpen: true,                   // 方案预览中的商品明细下拉是否展开
+        slots: [{ category: '', quantity: 1, price_op: '', price: null, discount_op: '', discount: null, price_min: null, price_max: null }] as SolutionSlotInput[],
         result: null as SolutionAnalyzeResult | null,
-        filterCat1: undefined as string | undefined,
-        filterBrand: undefined as string | undefined,
-        filterCat2: undefined as string | undefined,
-        filterCat3: undefined as string | undefined,
-        filterPrice: '',
-        filterNego: '',
-        filterPurchase: '',
-        filterRetail: '',
-        filterDiscount: '',
         solutionName: '',
-        solutionRemark: '',
         savedPlanId: null as number | null,
+        selectedSolutionIdx: null as number | null,  // 当前选中的组合方案索引
     });
 
-    const { requirement, useAI, result } = pageState;
-    const { filterCat1, filterBrand, filterCat2, filterCat3, filterPrice, filterNego, filterPurchase, filterRetail, filterDiscount } = pageState;
-    const { solutionName, solutionRemark, savedPlanId } = pageState;
-
+    const { requirement, useAI, aiMode, aiText, totalPrice, totalPriceOp, totalDiscount, totalDiscountOp, slotsOpen, previewItemsOpen, slots, result, solutionName, savedPlanId, selectedSolutionIdx } = pageState;
     const updateState = useCallback((patch: Partial<typeof pageState>) => {
         setPageState({ ...pageState, ...patch });
     }, [pageState, setPageState]);
 
-    // 筛选器数据（非持久化）
-    const [categories, setCategories] = useState<string[]>([]);
-    const [brands, setBrands] = useState<string[]>([]);
-    const [categoryLevel2, setCategoryLevel2] = useState<string[]>([]);
-    const [categoryLevel3, setCategoryLevel3] = useState<string[]>([]);
+    // ====== 结构化输入：商品信息块操作 ======
 
-    // 方案：已选商品 { product_id: quantity }
-    const [selectedItems, setSelectedItems] = useState<Map<number, number>>(() => {
-        try {
-            const raw = localStorage.getItem('solution_cart');
-            if (raw) return new Map<number, number>(JSON.parse(raw));
-        } catch { /* ignore */ }
-        return new Map<number, number>();
-    });
-    // 购物车商品详情（从 localStorage 加载后自动获取）
-    const [cartProducts, setCartProducts] = useState<Product[]>([]);
+    const updateSlot = useCallback((idx: number, patch: Partial<SolutionSlotInput>) => {
+        const next = slots.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+        updateState({ slots: next });
+    }, [slots, updateState]);
 
-    // 推荐产品
-    // 购买提示弹窗
-    const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
-    const [purchaseItems, setPurchaseItems] = useState<SolutionCandidate[]>([]);
+    const addSlot = useCallback(() => {
+        updateState({ slots: [...slots, { category: '', quantity: 1, price_op: '', price: null, discount_op: '', discount: null, price_min: null, price_max: null }] });
+    }, [slots, updateState]);
+
+    const removeSlot = useCallback((idx: number) => {
+        if (slots.length <= 1) {
+            message.warning('至少保留一个商品信息');
+            return;
+        }
+        updateState({ slots: slots.filter((_, i) => i !== idx) });
+    }, [slots, updateState]);
+
+    // ====== 智能诊断：一键应用建议 ======
+
+    // 后端按 quantity 展开槽位，需映射回前端商品块索引（同一商品块对应多个后端槽位）
+    const backendToFrontSlotIndex = useCallback((backendIdx: number) => {
+        let acc = 0;
+        for (let i = 0; i < slots.length; i++) {
+            acc += Math.max(1, slots[i].quantity || 1);
+            if (backendIdx < acc) return i;
+        }
+        return slots.length - 1;
+    }, [slots]);
+
+    // 高亮定位到指定输入框（滚动到视野 + 紫色边框闪烁）
+    const flashHighlight = useCallback((id: string, shouldScroll = true, duration = 3000) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (shouldScroll) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // antd InputNumber 的边框在外层容器 .ant-input-number 上，高亮容器更明显
+        const box = el.closest('.ant-input-number') as HTMLElement | null;
+        const target = box || el;
+        target.style.transition = 'border-color 0.3s, box-shadow 0.3s';
+        target.style.borderColor = '#722ed1';
+        target.style.borderWidth = '2px';
+        target.style.boxShadow = '0 0 0 3px rgba(114,46,209,0.3)';
+        target.style.borderRadius = '6px';
+        setTimeout(() => {
+            target.style.borderColor = '';
+            target.style.borderWidth = '';
+            target.style.boxShadow = '';
+            target.style.transition = '';
+        }, duration);
+    }, []);
+
+    // 无方案时：自动高亮诊断涉及的输入框（紫色边框 + 发光闪烁），让用户知道该改哪里
+    const autoHighlightDiagnosis = useCallback((diag: SolutionDiagnosis[]) => {
+        if (!diag?.length) return;
+        let needsSlotOpen = false;
+        const targets: { id: string; scroll: boolean }[] = [];
+        diag.forEach((d, idx) => {
+            const adj = d.adjust;
+            if (!adj) return;
+            let id: string | null = null;
+            if (adj.field === 'total_price') {
+                id = 'sol-total-price';
+            } else if (adj.field === 'total_discount') {
+                id = 'sol-total-discount';
+            } else if (adj.field === 'price' && adj.slot_index != null) {
+                needsSlotOpen = true;
+                id = `sol-price-${backendToFrontSlotIndex(adj.slot_index)}`;
+            } else if (adj.field === 'discount' && adj.slot_index != null) {
+                needsSlotOpen = true;
+                id = `sol-discount-${backendToFrontSlotIndex(adj.slot_index)}`;
+            } else if (adj.field === 'category' && adj.slot_index != null) {
+                needsSlotOpen = true;
+                id = `sol-cat-${backendToFrontSlotIndex(adj.slot_index)}`;
+            }
+            if (id) targets.push({ id, scroll: idx === 0 });
+        });
+        if (!targets.length) return;
+        const doHighlight = () => {
+            // 第一条滚动定位，其余仅高亮避免页面跳动
+            targets.forEach((t) => flashHighlight(t.id, t.scroll, 5000));
+        };
+        if (needsSlotOpen && !slotsOpen) {
+            updateState({ slotsOpen: true });
+            setTimeout(doHighlight, 120);
+        } else {
+            doHighlight();
+        }
+    }, [backendToFrontSlotIndex, flashHighlight, slotsOpen, updateState]);
+
+    const applyAdjust = useCallback((d: SolutionDiagnosis) => {
+        const adj = d?.adjust;
+        if (!adj) return;
+        // AI 模式：后端已把调整改写为"直接覆盖需求文本"，此处直接覆盖用户输入（不照搬非 AI 的改输入框逻辑）
+        if (adj.field === 'requirement') {
+            const revised = (adj.value as string) || '';
+            updateState({ aiText: revised, requirement: revised });
+            flashHighlight('sol-ai-text');
+            message.success('✅ 已按诊断自动改写需求文本（已覆盖输入框），请点击「生成方案」重新生成');
+            return;
+        }
+        const { field, slot_index, op } = adj;
+        // 结构化（非 AI）调整：value 必为数值（requirement 分支已提前 return）
+        const value = (adj.value as number | null);
+        const priceOp = (op as 'gt' | 'lt' | 'around' | '') || 'lt';
+        const discOp = (op as 'gt' | 'lt' | 'around' | '') || 'lt';
+
+        if (field === 'total_price') {
+            updateState({ totalPrice: value ?? null, totalPriceOp: priceOp });
+            flashHighlight('sol-total-price');
+            message.success(`✅ 已自动把总价${priceOp === 'gt' ? '下限' : priceOp === 'around' ? '限制' : '上限'}填入 ${value} 元（输入框已高亮），请点击「生成方案」`);
+        } else if (field === 'total_discount') {
+            updateState({ totalDiscount: value ?? null, totalDiscountOp: discOp });
+            flashHighlight('sol-total-discount');
+            message.success(`✅ 已自动把总折扣率${discOp === 'gt' ? '下限' : '上限'}填入 ${value}%（输入框已高亮），请点击「生成方案」`);
+        } else if (field === 'price' && slot_index != null) {
+            const fi = backendToFrontSlotIndex(slot_index);
+            if (!slotsOpen) updateState({ slotsOpen: true });
+            updateSlot(fi, { price_op: priceOp, price: value ?? null });
+            flashHighlight(`sol-price-${fi}`);
+            message.success(`✅ 已自动把第 ${fi + 1} 个商品「${slots[fi]?.category || ''}」的价格限制填入 ${value} 元（价格输入框已高亮），请点击「生成方案」`);
+        } else if (field === 'discount' && slot_index != null) {
+            const fi = backendToFrontSlotIndex(slot_index);
+            if (!slotsOpen) updateState({ slotsOpen: true });
+            updateSlot(fi, { discount_op: discOp, discount: value ?? null });
+            flashHighlight(`sol-discount-${fi}`);
+            message.success(`✅ 已自动把第 ${fi + 1} 个商品「${slots[fi]?.category || ''}」的折扣率限制填入 ${value}%（折扣率输入框已高亮），请点击「生成方案」`);
+        } else if (field === 'remove_last_slot') {
+            if (slots.length > 1) {
+                updateState({ slots: slots.slice(0, slots.length - 1) });
+                message.success('✅ 已移除最后一个商品，请点击「生成方案」重新生成');
+            } else {
+                message.warning('至少保留一个商品信息');
+            }
+        }
+    }, [updateState, updateSlot, slots, slotsOpen, flashHighlight, backendToFrontSlotIndex]);
+
+    // 三级品类列表（用于产品品类自动补全）
+    const [level3Categories, setLevel3Categories] = useState<string[]>([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(false);
+
+    useEffect(() => {
+        setCategoriesLoading(true);
+        fetchCategoryLevel3()
+            .then(setLevel3Categories)
+            .catch(() => setLevel3Categories([]))
+            .finally(() => setCategoriesLoading(false));
+    }, []);
 
     // 历史方案
     const [historyOpen, setHistoryOpen] = useState(false);
     const [historyList, setHistoryList] = useState<any[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
 
+    // 列显示配置
+    const [columnConfigOpen, setColumnConfigOpen] = useState(false);
+    const [solutionColumnConfig, setSolutionColumnConfig] = useState<ColumnConfigItem[] | undefined>(undefined);
+    const pageTypeForConfig = 'solution_items';
+
+    // 推荐产品
+    const [recommendedProducts, setRecommendedProducts] = useState<RecommendedProduct[]>([]);
+    const [recommendedLoading, setRecommendedLoading] = useState(false);
+
+    // 推荐方案
+    const [recommendedSolutions, setRecommendedSolutions] = useState<any[]>([]);
+    const [recommendedSolutionsLoading, setRecommendedSolutionsLoading] = useState(false);
+
+    const loadSolutionColumnConfig = useCallback(async () => {
+        try {
+            const data = await getColumnDisplayConfig(pageTypeForConfig);
+            setSolutionColumnConfig(data.columns || []);
+        } catch {
+            setSolutionColumnConfig(undefined);
+        }
+    }, [pageTypeForConfig]);
+
+    // 当 result 变化时（分析完成或页面状态恢复），加载列配置和推荐内容
     useEffect(() => {
-        fetchCategories().then(setCategories).catch(() => { });
-        fetchBrands().then(setBrands).catch(() => { });
-        fetchCategoryLevel2().then(setCategoryLevel2).catch(() => { });
-        fetchCategoryLevel3().then(setCategoryLevel3).catch(() => { });
-    }, []);
+        if (result?.solutions) {
+            loadSolutionColumnConfig();
+            if (recommendedProducts.length === 0 && recommendedSolutions.length === 0) {
+                fetchRecommendations(requirement);
+            }
+        }
+    }, [result]);
 
-    const isFirstRender = useRef(true);
+    // ========== 获取推荐产品 & 推荐方案 ==========
 
-    // 加载购物车商品详情
-    useEffect(() => {
-        if (selectedItems.size > 0) {
-            const ids = Array.from(selectedItems.keys());
-            fetchProductsByIds(ids).then(products => {
-                setCartProducts(products);
-            }).catch(() => { });
+    const fetchRecommendations = async (requirementText: string) => {
+        setRecommendedLoading(true);
+        setRecommendedSolutionsLoading(true);
+        try {
+            // 获取推荐产品
+            const prodRes = await getRecommendedProducts({ filters: {}, page: 1, page_size: 20 });
+            setRecommendedProducts(prodRes.items || []);
+        } catch {
+            setRecommendedProducts([]);
+        } finally {
+            setRecommendedLoading(false);
         }
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // 筛选项变动时自动触发分析（排除首次）
-    useEffect(() => {
-        if (isFirstRender.current) {
-            isFirstRender.current = false;
-            return;
+        // 获取推荐方案（使用解析后的需求文本）
+        if (requirementText.trim()) {
+            try {
+                const solRes = await getRecommendedSolutions({
+                    requirement: requirementText.trim(),
+                    max_solutions: 50,
+                });
+                setRecommendedSolutions(solRes.solutions || []);
+            } catch {
+                setRecommendedSolutions([]);
+            } finally {
+                setRecommendedSolutionsLoading(false);
+            }
+        } else {
+            setRecommendedSolutionsLoading(false);
         }
-        // 每次筛选条件变化自动分析（防抖 500ms）
-        const timer = setTimeout(() => handleAnalyzeWithRecommend(), 500);
-        return () => clearTimeout(timer);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filterCat1, filterBrand, filterCat2, filterCat3, filterPrice, filterNego, filterPurchase, filterRetail, filterDiscount]);
+    };
 
-    // 同步 selectedItems 到 localStorage，并通知其他组件
-    useEffect(() => {
-        localStorage.setItem('solution_cart', JSON.stringify([...selectedItems.entries()]));
-        window.dispatchEvent(new CustomEvent('solutionCartChange', { detail: selectedItems.size }));
-    }, [selectedItems]);
+    // ========== 组合方案处理 ==========
 
-    const buildFilters = () => {
-        const filters: Record<string, unknown> = {};
-        if (filterCat1) filters.category_level1 = filterCat1;
-        if (filterBrand) filters.brand = filterBrand;
-        if (filterCat2) filters.category_level2 = filterCat2;
-        if (filterCat3) filters.category_level3 = filterCat3;
-        // 价格筛选（解析 PRICE_RANGES 的 query 字符串）
-        if (filterPrice) {
-            const m = filterPrice.match(/价格在(\d+)到(\d+)/);
-            if (m) { filters.price_min = parseFloat(m[1]); filters.price_max = parseFloat(m[2]); }
+    // 方案结果后处理：去重 + 默认智能排序
+    const postProcess = (data: SolutionAnalyzeResult): SolutionAnalyzeResult => {
+        if (data.solutions) {
+            const seen = new Set<string>();
+            data.solutions = data.solutions.filter((sol: SolutionCombination) => {
+                const qms = sol.items.map((item: SolutionSlotItem) => item.quick_model).sort().join(',');
+                if (seen.has(qms)) return false;
+                seen.add(qms);
+                return true;
+            });
+            data.total_solutions = data.solutions.length;
         }
-        if (filterNego) {
-            const m = filterNego.match(/价格在(\d+)到(\d+)/);
-            if (m) { filters.negotiation_price_min = parseFloat(m[1]); filters.negotiation_price_max = parseFloat(m[2]); }
-        }
-        if (filterPurchase) {
-            const m = filterPurchase.match(/价格在(\d+)到(\d+)/);
-            if (m) { filters.purchase_price_min = parseFloat(m[1]); filters.purchase_price_max = parseFloat(m[2]); }
-        }
-        if (filterRetail) {
-            const m = filterRetail.match(/价格在(\d+)到(\d+)/);
-            if (m) { filters.retail_price_min = parseFloat(m[1]); filters.retail_price_max = parseFloat(m[2]); }
-        }
-        if (filterDiscount) {
-            const m = filterDiscount.match(/折扣率在(\d+)到(\d+)/);
-            if (m) { filters.discount_rate_min = parseFloat(m[1]); filters.discount_rate_max = parseFloat(m[2]); }
-        }
-        return filters;
+        setSortOrder('smart');
+        return data;
     };
 
     const handleAnalyze = async () => {
-        if (!requirement.trim() && !filterCat1 && !filterBrand && !filterCat2 && !filterCat3) {
-            message.warning('请输入客户需求或选择筛选条件');
+        // ===== AI 智能输入模式：直接解析自然语言 =====
+        if (aiMode) {
+            if (!aiText?.trim()) {
+                message.warning('请输入客户需求描述');
+                return;
+            }
+            if (!user?.has_api_key) {
+                message.warning('未配置 API Key，无法使用 AI 智能输入。请在右上角用户菜单中配置。');
+                return;
+            }
+            setLoading(true);
+            setRecommendedProducts([]);
+            setRecommendedSolutions([]);
+            try {
+                const data = await analyzeSolution({
+                    requirement: aiText.trim(),
+                    use_ai: true,
+                    max_solutions: 200,
+                });
+                const processed = postProcess(data);
+                updateState({ result: processed, requirement: aiText.trim(), savedPlanId: null, selectedSolutionIdx: null });
+                if (processed.total_solutions > 0) {
+                    message.success(`找到 ${processed.total_solutions} 个符合条件的组合方案`);
+                } else if (processed.diagnosis?.length) {
+                    message.warning('暂未生成合适方案，已高亮需要调整的输入框，请按下方智能诊断建议调整');
+                    autoHighlightDiagnosis(processed.diagnosis);
+                } else {
+                    message.info(processed.message || '未找到符合条件的组合方案');
+                }
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : '分析失败';
+                message.error(msg);
+            } finally {
+                setLoading(false);
+            }
             return;
         }
+
+        // 汇总所有缺失的必填项，一次性提醒用户
+        const missing: string[] = [];
+
+        // 总价必填
+        if (!totalPrice && totalPrice !== 0) {
+            missing.push('总价');
+        } else if (totalPrice !== null && totalPrice !== undefined && totalPrice <= 0) {
+            missing.push('总价（需大于 0）');
+        }
+
+        // 每个商品的品类必填
+        if (slots.length === 0) {
+            missing.push('至少一个商品');
+        } else {
+            slots.forEach((s, i) => {
+                if (!s.category?.trim()) {
+                    missing.push(`第 ${i + 1} 个商品的品类`);
+                }
+            });
+        }
+
+        if (missing.length > 0) {
+            message.warning(`请完善以下必填项：${missing.join('；')}`);
+            return;
+        }
+
+        // 必填项已全部填写
+        const validSlots = slots.filter(s => s.category?.trim());
+        const summary = buildRequirementSummary(totalPrice, totalDiscount, validSlots, totalPriceOp, totalDiscountOp);
         setLoading(true);
+        setRecommendedProducts([]);
+        setRecommendedSolutions([]);
         try {
             const data = await analyzeSolution({
-                requirement: requirement.trim(),
-                use_ai: useAI,
-                filters: buildFilters(),
+                requirement: summary,
+                use_ai: false,
+                total_price: totalPrice,
+                total_price_op: totalPriceOp,
+                // 选择"不限"时总折扣率不生效
+                max_discount_rate: totalDiscountOp === '' ? null : totalDiscount,
+                max_discount_op: totalDiscountOp,
+                slots: validSlots.map(s => {
+                    // 优先使用新的操作符 + 价格值；兼容旧数据（仅 price_max → 小于）
+                    let op: '' | 'gt' | 'lt' | 'around' = s.price_op || '';
+                    let val = s.price;
+                    if (!op && s.price_max != null) {
+                        op = 'lt';
+                        val = s.price_max;
+                    }
+                    return {
+                        category: s.category?.trim() || '',
+                        quantity: Math.max(1, s.quantity || 1),
+                        price_op: op,
+                        price: val ?? null,
+                        discount_op: s.discount_op || '',
+                        discount: s.discount ?? null,
+                        price_min: null,
+                        price_max: null,
+                    };
+                }),
+                max_solutions: 200,
             });
-            updateState({ result: data, savedPlanId: null });
-            if (data.total_candidates > 0) {
-                message.success(`找到 ${data.total_candidates} 个候选商品`);
+            const processed = postProcess(data);
+            updateState({ result: processed, requirement: summary, savedPlanId: null, selectedSolutionIdx: null });
+            if (processed.total_solutions > 0) {
+                message.success(`找到 ${processed.total_solutions} 个符合条件的组合方案`);
+            } else if (processed.diagnosis?.length) {
+                message.warning('暂未生成合适方案，已高亮需要调整的输入框，请按下方智能诊断建议调整');
+                autoHighlightDiagnosis(processed.diagnosis);
             } else {
-                message.info(data.message || '未找到匹配的商品');
+                message.info(processed.message || '未找到符合条件的组合方案');
             }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : '分析失败';
@@ -175,76 +436,35 @@ export default function SolutionPage() {
         }
     };
 
-    // 处理选品
-    const toggleItem = (productId: number) => {
-        setSelectedItems(prev => {
-            const next = new Map(prev);
-            if (next.has(productId)) {
-                next.delete(productId);
-            } else {
-                next.set(productId, 1);
-            }
-            return next;
-        });
+    // 选中某个组合方案
+    const selectSolution = (idx: number) => {
+        updateState({ selectedSolutionIdx: idx });
     };
 
-    const updateQuantity = (productId: number, qty: number) => {
-        setSelectedItems(prev => {
-            const next = new Map(prev);
-            if (qty <= 0) {
-                next.delete(productId);
-            } else {
-                next.set(productId, qty);
-            }
-            return next;
-        });
-    };
-
-    const clearSelected = () => setSelectedItems(new Map());
-
-    // 分析需求（推荐产品会由后端直接返回在 candidates 中）
-    const handleAnalyzeWithRecommend = async () => {
-        await handleAnalyze();
-    };
-
-    // 保存方案
+    // 保存选中的方案
     const handleSave = async () => {
-        if (selectedItems.size === 0) {
-            message.warning('请至少选择一个商品');
+        if (selectedSolutionIdx === null || !result?.solutions[selectedSolutionIdx]) {
+            message.warning('请先选择一个组合方案');
             return;
         }
 
-        // 检查购物车中是否包含推荐产品（从 analyze 结果中查找 is_recommended 标记）
-        const selectedCandidates = (result?.candidates ?? []).filter(c => selectedItems.has(c.id));
-        const cartRecommended = selectedCandidates.filter(c => c.is_recommended);
+        const selected = result.solutions[selectedSolutionIdx];
+        const items: SolutionItemData[] = selected.items.map((item: SolutionSlotItem) => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+        }));
 
-        if (cartRecommended.length > 0) {
-            // 有推荐产品，弹出购买提示弹窗
-            setPurchaseItems(cartRecommended);
-            setPurchaseModalOpen(true);
-            return;
-        }
-
-        // 无推荐产品，正常保存
-        await doSave();
-    };
-
-    const doSave = async () => {
-        const items: SolutionItemData[] = [];
-        selectedItems.forEach((qty, productId) => {
-            items.push({ product_id: productId, quantity: qty });
-        });
-        const name = solutionName.trim() || `方案_${new Date().toLocaleDateString('zh-CN')}`;
+        const name = solutionName.trim() || `组合方案_${new Date().toLocaleDateString('zh-CN')}`;
         try {
             const res = await saveSolution({
                 name,
                 requirement: requirement || '（无需求文本）',
-                remark: solutionRemark,
+                remark: '',
                 ai_enabled: useAI,
                 items,
             });
             updateState({ savedPlanId: res.plan_id });
-            message.success(`方案已保存，共 ${res.items_count} 个商品，总金额 ¥${res.total_amount}。如需清空购物车请点击"清空"按钮`);
+            message.success(`方案已保存，共 ${res.items_count} 个商品，总金额 ¥${res.total_amount}`);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : '保存失败';
             message.error(msg);
@@ -266,71 +486,9 @@ export default function SolutionPage() {
         }
     };
 
-    // 图片列渲染（与智能查询保持一致）
-    const renderImage = (_: unknown, record: any) => {
-        const v = record.image;
-        if (!v || v === '') return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
-        const src = v.startsWith('data:') ? v : `data:image/png;base64,${v}`;
-        return (
-            <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
-                <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
-            </Tooltip>
-        );
-    };
-
-    // 操作列渲染
-    const renderAction = (_: unknown, record: SolutionCandidate) => {
-        const selected = selectedItems.has(record.id);
-        return (
-            <Button size="small" type={selected ? 'primary' : 'default'} onClick={() => toggleItem(record.id)}>
-                {selected ? '已选' : '添加'}
-            </Button>
-        );
-    };
-
-    // 候选商品表格列（不含来源列，操作列在最前面）
-    const candidateColumns: any[] = [
-        { title: '操作', key: 'action', width: 80, render: renderAction },
-        { title: '图片', key: 'image', width: 60, render: renderImage },
-        { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 150, ellipsis: true, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-        { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160, ellipsis: true, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-        { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
-        { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 80 },
-        { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 80 },
-        { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => (v !== null && v !== undefined ? <Text strong style={{ color: '#cf1322' }}>¥{Number(v).toFixed(2)}</Text> : '-') },
-        { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 70 },
-    ];
-
-    // 推荐产品表格列（含来源列，操作列在最前面）
-    const recommendedColumns: any[] = [
-        { title: '操作', key: 'action', width: 80, render: renderAction },
-        { title: '图片', key: 'image', width: 60, render: renderImage },
-        { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 150, ellipsis: true, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-        { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160, ellipsis: true, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-        { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
-        { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 80 },
-        { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 80 },
-        { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => (v !== null && v !== undefined ? <Text strong style={{ color: '#cf1322' }}>¥{Number(v).toFixed(2)}</Text> : '-') },
-        { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 70 },
-        {
-            title: '来源', key: 'source', width: 90,
-            render: (_: unknown, record: any) => (
-                <Tag color={record.source_role === 'super_admin' ? 'red' : 'blue'}>{record.source_company_name || record.source_role}</Tag>
-            ),
-        },
-    ];
-
-    // 已选商品列表：优先用分析结果中的信息，回退到独立加载的购物车详情
-    const selectedFromResult = result?.candidates.filter(c => selectedItems.has(c.id)) ?? [];
-    const selectedFromCart = cartProducts.filter(c => selectedItems.has(c.id) && !selectedFromResult.find(r => r.id === c.id));
-    const selectedDisplay = [...selectedFromResult, ...selectedFromCart.map(c => ({
-        id: c.id, quick_model: c.quick_model, product_model: c.product_model,
-        product_name: c.product_name, brand: c.brand, category_level1: c.category_level1,
-        category_level2: c.category_level2, specification: c.specification,
-        price: c.price, supply_status: c.supply_status,
-    } as SolutionCandidate))];
-    const totalAmount = selectedDisplay.reduce((sum, c) => sum + c.price * (selectedItems.get(c.id) ?? 0), 0);
-    const totalQty = selectedDisplay.reduce((sum, c) => sum + (selectedItems.get(c.id) ?? 0), 0);
+    // 已选方案的商品数量总计
+    const selectedSolutionTotal = selectedSolutionIdx !== null && result?.solutions[selectedSolutionIdx]
+        ? result.solutions[selectedSolutionIdx].total_quantity : 0;
 
     // 历史方案
     const openHistory = async () => {
@@ -346,19 +504,55 @@ export default function SolutionPage() {
     const handleReusePlan = async (planId: number) => {
         try {
             const detail = await getSolutionDetail(planId);
-            const items = (detail.items as any[]) || [];
-            const newMap = new Map<number, number>();
-            for (const item of items) {
-                newMap.set(item.product_id, item.quantity || 1);
-            }
-            setSelectedItems(newMap);
+            const items_list = (detail.items || []) as any[];
+            // 构建一个和 analyze 返回格式一致的 solution 对象
+            const planItems = items_list.map((item: any) => ({
+                product_id: item.product_id,
+                quick_model: item.quick_model || '',
+                product_model: item.product_model || '',
+                product_name: item.product_name || '',
+                brand: item.brand || '',
+                category_level1: item.category_level1 || '',
+                category_level2: item.category_level2 || '',
+                specification: item.specification || '',
+                price: item.price || 0,
+                retail_price: item.retail_price || 0,
+                discount_rate: item.discount_rate || 0,
+                quantity: item.quantity || 1,
+                subtotal: item.subtotal || (item.price || 0) * (item.quantity || 1),
+            }));
+            const totalPrice = planItems.reduce((sum: number, i: any) => sum + (i.subtotal || 0), 0);
+            const totalDiscount = planItems.reduce((sum: number, i: any) => {
+                if (i.retail_price && i.retail_price > 0) {
+                    return sum + (i.price / i.retail_price * 100);
+                }
+                return sum;
+            }, 0) / (planItems.length || 1);
+
+            const reuseSolution: SolutionCombination = {
+                total_price: totalPrice,
+                total_quantity: planItems.length,
+                total_discount_rate: parseFloat(totalDiscount.toFixed(2)),
+                items: planItems,
+            };
+
+            const reuseResult: SolutionAnalyzeResult = {
+                solutions: [reuseSolution],
+                total_solutions: 1,
+                message: `已加载历史方案「${detail.name || ''}」`,
+                ai_interpretation: '',
+                parsed_constraints: {},
+            };
+
             updateState({
+                result: reuseResult,
+                savedPlanId: planId,
+                selectedSolutionIdx: 0,
                 solutionName: detail.name as string || '',
-                solutionRemark: detail.remark as string || '',
                 requirement: detail.requirement as string || '',
             });
             setHistoryOpen(false);
-            message.success('已加载历史方案，请点击「分析需求」更新候选商品');
+            message.success(`已加载历史方案，共 ${planItems.length} 个商品`);
         } catch (err: unknown) {
             message.error('加载方案失败');
         }
@@ -372,320 +566,783 @@ export default function SolutionPage() {
         } catch { message.error('删除失败'); }
     };
 
-    // 渲染预览卡片内容
-    const renderPreviewCard = () => {
-        // 有可展示的选品（来自分析结果或购物车加载）
-        if (selectedDisplay.length > 0) {
-            return (
-                <>
-                    <div style={{ marginBottom: 8 }}>
-                        <Input placeholder="方案名称（可选）" value={solutionName}
-                            onChange={e => updateState({ solutionName: e.target.value })} size="small" />
-                    </div>
-                    <div style={{ marginBottom: 8 }}>
-                        <Input.TextArea placeholder="备注说明（可选，会出现在导出的文档中）" value={solutionRemark}
-                            onChange={e => updateState({ solutionRemark: e.target.value })} rows={2} size="small" />
-                    </div>
-                    <div style={{ maxHeight: 360, overflow: 'auto' }}>
-                        {selectedDisplay.map(c => {
-                            const qty = selectedItems.get(c.id) ?? 1;
-                            const isRecommended = (c as any).is_recommended === true;
-                            return (
-                                <div key={c.id} style={{
-                                    padding: '6px 0', borderBottom: '1px solid #f0f0f0',
-                                    display: 'flex', alignItems: 'center', gap: 8,
-                                    background: isRecommended ? '#fffbe6' : 'transparent',
-                                }}>
-                                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                                        <Tooltip title={c.product_name || c.quick_model}>
-                                            <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                {c.product_name || c.quick_model}
-                                                {isRecommended && <Tag color="warning" style={{ marginLeft: 4, fontSize: 11 }}>推荐</Tag>}
-                                            </div>
-                                        </Tooltip>
-                                        <div style={{ fontSize: 12, color: '#999' }}>
-                                            {c.brand} | ¥{c.price.toFixed(2)}
-                                            {isRecommended && (
-                                                <span style={{ marginLeft: 8, color: '#faad14' }}>
-                                                    {(c as any).source_company_name || '外部推荐'}
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <InputNumber min={1} max={99999} value={qty}
-                                        onChange={v => updateQuantity(c.id, v ?? 1)}
-                                        size="small" style={{ width: 65 }} />
-                                    <Text style={{ width: 70, textAlign: 'right', fontSize: 13, color: '#cf1322' }}>
-                                        ¥{(c.price * qty).toFixed(2)}
-                                    </Text>
-                                    <Button type="text" size="small" danger icon={<DeleteOutlined />}
-                                        onClick={() => toggleItem(c.id)} />
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <Divider style={{ margin: '8px 0' }} />
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Text>共 <strong>{selectedItems.size}</strong> 种 / <strong>{totalQty}</strong> 件</Text>
-                        <Text strong style={{ fontSize: 16, color: '#cf1322' }}>¥{totalAmount.toFixed(2)}</Text>
-                    </div>
-                    {savedPlanId && (
-                        <Alert type="success" showIcon message={`已保存（ID: ${savedPlanId}）`} style={{ marginTop: 8 }} />
-                    )}
-                </>
-            );
-        }
-        // 有购物车但还没加载完或没分析
-        if (selectedItems.size > 0 && selectedDisplay.length === 0) {
-            return (
-                <div style={{ color: '#999', textAlign: 'center', padding: '20px 0' }}>
-                    购物车中有 <strong>{selectedItems.size}</strong> 个商品，<br />
-                    正在加载商品信息...
-                </div>
-            );
-        }
-        // 空状态
+    // 清除当前选中的方案（不清除结果列表）
+    const handleClear = () => {
+        updateState({
+            savedPlanId: null,
+            selectedSolutionIdx: null,
+            solutionName: '',
+        });
+    };
+
+    // 组合方案表格列定义
+    const renderImage = (v: string) => {
+        if (!v || v === '') return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
+        const src = v.startsWith('data:') ? v : `data:image/png;base64,${v}`;
         return (
-            <div style={{ color: '#999', textAlign: 'center', padding: '20px 0' }}>
-                请在智能查询页加入商品，<br />
-                或从左侧搜索后「添加」选择商品
-            </div>
+            <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
+                <img src={src} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+            </Tooltip>
         );
     };
 
+    const solutionItemColumns = useMemo(() => {
+        const baseColumns = [
+            {
+                title: '图片', dataIndex: 'image', key: 'image', width: 55,
+                render: (v: string) => renderImage(v),
+            },
+            { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: true },
+            { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: true },
+            {
+                title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160,
+                ellipsis: { showTitle: false },
+                render: (v: string, record: SolutionSlotItem) => (
+                    <Tooltip title={`${v || record.quick_model} (${record.brand})`}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {v || record.quick_model}
+                        </span>
+                    </Tooltip>
+                )
+            },
+            { title: '品牌', dataIndex: 'brand', key: 'brand', width: 60 },
+            { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 70 },
+            { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 70 },
+            { title: '三级品类', dataIndex: 'category_level3', key: 'category_level3', width: 70 },
+            { title: '备货商谈价', dataIndex: 'negotiation_price', key: 'negotiation_price', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 95, ellipsis: true },
+            { title: '上次进货价', dataIndex: 'last_purchase_price', key: 'last_purchase_price', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '新活动价', dataIndex: 'new_event_price', key: 'new_event_price', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '集采价', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '规格', dataIndex: 'specification', key: 'specification', width: 110, ellipsis: true },
+            {
+                title: '代发价', dataIndex: 'price', key: 'price', width: 70,
+                render: (v: number) => <Text strong style={{ color: '#cf1322' }}>¥{v.toFixed(2)}</Text>
+            },
+            { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 70, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 60, render: (v: number) => v ? `${v.toFixed(1)}%` : '-' },
+            {
+                title: '链接', dataIndex: 'shop_url', key: 'shop_url', width: 150,
+                ellipsis: { showTitle: false },
+                render: (v: string) => v ? (
+                    <a href={v} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                        style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {v}
+                    </a>
+                ) : '-',
+            },
+            { title: '毛重(kg)', dataIndex: 'gross_weight', key: 'gross_weight', width: 65, render: (v: number) => v ? v : '-' },
+            { title: '箱规', dataIndex: 'box_spec', key: 'box_spec', width: 110, ellipsis: true },
+            { title: '合作等级', dataIndex: 'cooperation_level', key: 'cooperation_level', width: 65 },
+            { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 65 },
+            { title: '备注', dataIndex: 'remark', key: 'remark', width: 140, ellipsis: true },
+            { title: '代发运费', dataIndex: 'shipping_fee', key: 'shipping_fee', width: 75, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
+            { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 130, ellipsis: true },
+            { title: '销量', dataIndex: 'sales_volume', key: 'sales_volume', width: 55 },
+            { title: '推荐理由', dataIndex: 'recommendation', key: 'recommendation', width: 130, ellipsis: true },
+            { title: '参数', dataIndex: 'parameters', key: 'parameters', width: 100, ellipsis: true },
+            { title: '3C', dataIndex: 'cert_3c', key: 'cert_3c', width: 65, ellipsis: true },
+            { title: '导入时间', dataIndex: 'created_at', key: 'created_at', width: 150, ellipsis: true },
+            { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 60 },
+            {
+                title: '小计', dataIndex: 'subtotal', key: 'subtotal', width: 80,
+                render: (v: number) => <Text strong>¥{v.toFixed(2)}</Text>
+            },
+        ];
+
+        if (solutionColumnConfig && solutionColumnConfig.length > 0) {
+            const configMap = new Map(solutionColumnConfig.map(c => [c.key, c]));
+            return baseColumns
+                .filter(col => {
+                    const key = String((col as any).key ?? '');
+                    const cfg = configMap.get(key);
+                    return cfg ? cfg.visible : true;
+                })
+                .map(col => {
+                    const key = String((col as any).key ?? '');
+                    const cfg = configMap.get(key);
+                    if (cfg) {
+                        return {
+                            ...col,
+                            title: cfg.label || col.title,
+                            // 如果配置中指定了列宽则使用，否则不设宽度让列自适应
+                            width: cfg.width || undefined,
+                        };
+                    }
+                    return col;
+                })
+                .sort((a, b) => {
+                    const keyA = String((a as any).key ?? '');
+                    const keyB = String((b as any).key ?? '');
+                    const orderMap = new Map(solutionColumnConfig.map((c, i) => [c.key, i]));
+                    const ai = orderMap.get(keyA) ?? 999;
+                    const bi = orderMap.get(keyB) ?? 999;
+                    return ai - bi;
+                });
+        }
+        return baseColumns;
+    }, [solutionColumnConfig]);
+
+    // 选中组合方案的商品明细
+    const selectedSolution = selectedSolutionIdx !== null && result?.solutions[selectedSolutionIdx]
+        ? result.solutions[selectedSolutionIdx] : null;
+
     return (
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-            {/* 需求输入区 */}
-            <Card size="small" style={{ marginBottom: 16 }}>
-                <Row gutter={16}>
-                    <Col span={16}>
-                        <TextArea
-                            value={requirement}
-                            onChange={e => updateState({ requirement: e.target.value })}
-                            placeholder="请输入客户项目需求，例如：&#10;需要一批价格在50-100元的充电宝，品牌飞利浦，用于投标项目"
-                            rows={3}
-                            style={{ fontSize: 14 }}
-                        />
-                    </Col>
-                    <Col span={8}>
-                        <div style={{ marginBottom: 8 }}>
-                            <Space>
-                                <Tooltip title={useAI ? 'AI 模式：调用大模型分析需求' : '普通模式：使用规则匹配'}>
-                                    <span>
-                                        {useAI ? <ThunderboltFilled style={{ color: '#faad14' }} /> : <ThunderboltOutlined style={{ color: '#d9d9d9' }} />}
-                                        <Switch size="small" checked={useAI} onChange={v => updateState({ useAI: v })} style={{ marginLeft: 4 }} />
-                                        <span style={{ marginLeft: 4, fontSize: 12, color: useAI ? '#faad14' : '#999' }}>AI</span>
+        <div style={{ margin: '0 auto', padding: '0 8px' }}>
+            {/* 顶部行：需求输入区 + 方案预览并列 */}
+            <Row gutter={16} align="stretch">
+                <Col xs={24} md={14}>
+                    {/* 需求输入区 */}
+                    <Card size="small" style={{ marginBottom: 16, height: '100%' }}>
+                        {aiMode ? (
+                            <div>
+                                <Input.TextArea
+                                    id="sol-ai-text"
+                                    rows={4}
+                                    value={aiText}
+                                    onChange={e => updateState({ aiText: e.target.value })}
+                                    placeholder="例如：我要一个价值500的礼盒，包含三个产品，整体折扣率低于70%，产品分别是移动电源、自拍杆、数据线，其中移动电源价值不低于300"
+                                />
+                                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                                    点击「生成组合方案」后，AI 将自动解析总价、三级品类、价格/折扣率限制并生成方案（需在右上角用户菜单配置 API Key）
+                                </Text>
+                            </div>
+                        ) : (
+                            <>
+                                {/* 总价 + 总折扣率（均支持 大于/小于/左右） */}
+                                <div style={{ marginBottom: 12, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ whiteSpace: 'nowrap' }}>
+                                        <Text type="secondary" style={{ marginRight: 8 }}>总价（必填）：</Text>
+                                        <Select
+                                            value={totalPriceOp}
+                                            onChange={v => updateState({ totalPriceOp: (v || 'lt') as 'gt' | 'lt' | 'around' })}
+                                            options={[
+                                                { value: 'lt', label: '小于' },
+                                                { value: 'gt', label: '大于' },
+                                                { value: 'around', label: '左右' },
+                                            ]}
+                                            style={{ width: 76 }}
+                                        />
+                                        <InputNumber
+                                            id="sol-total-price"
+                                            value={totalPrice}
+                                            onChange={v => updateState({ totalPrice: v })}
+                                            placeholder="如 500"
+                                            min={0}
+                                            precision={2}
+                                            addonAfter="元"
+                                            style={{ width: 140 }}
+                                        />
                                     </span>
-                                </Tooltip>
-                                <Button type="primary" icon={<SearchOutlined />} onClick={handleAnalyzeWithRecommend} loading={loading} size="large">
-                                    分析需求
-                                </Button>
-                                <Button icon={<FileTextOutlined />} onClick={openHistory} size="large">
-                                    历史方案
-                                </Button>
+                                    <span style={{ whiteSpace: 'nowrap' }}>
+                                        <Text type="secondary" style={{ marginRight: 8 }}>总折扣率（可选）：</Text>
+                                        <Select
+                                            value={totalDiscountOp}
+                                            onChange={v => updateState({ totalDiscountOp: (v || '') as '' | 'gt' | 'lt' | 'around' })}
+                                            options={[
+                                                { value: '', label: '不限' },
+                                                { value: 'lt', label: '小于' },
+                                                { value: 'gt', label: '大于' },
+                                                { value: 'around', label: '左右' },
+                                            ]}
+                                            style={{ width: 76 }}
+                                        />
+                                        <InputNumber
+                                            id="sol-total-discount"
+                                            value={totalDiscount}
+                                            onChange={v => updateState({ totalDiscount: v })}
+                                            placeholder="如 70"
+                                            min={0}
+                                            max={100}
+                                            precision={1}
+                                            addonAfter="%"
+                                            disabled={!totalDiscountOp}
+                                            style={{ width: 120 }}
+                                        />
+                                    </span>
+                                </div>
+
+                                {/* 商品信息整个区块做成下拉列表（点击标题整体展开/收起） */}
+                                <div style={{
+                                    border: '1px solid #f0f0f0',
+                                    borderRadius: 6,
+                                    marginBottom: 12,
+                                    background: '#fafafa',
+                                    overflow: 'hidden',
+                                }}>
+                                    <div
+                                        onClick={() => updateState({ slotsOpen: !slotsOpen })}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', cursor: 'pointer', userSelect: 'none' }}
+                                    >
+                                        <span style={{ color: '#999', display: 'inline-flex' }}>
+                                            {slotsOpen ? <DownOutlined /> : <RightOutlined />}
+                                        </span>
+                                        <Text strong>商品信息</Text>
+                                        <Tag color="blue" style={{ marginInlineEnd: 0 }}>{slots.length} 个商品</Tag>
+                                        <Text type="secondary" style={{ fontSize: 12 }}>（点击{slotsOpen ? '收起' : '展开'}）</Text>
+                                        <div style={{ flex: 1 }} />
+                                    </div>
+                                    {slotsOpen && (
+                                        <div style={{ padding: '0 10px 10px', borderTop: '1px solid #f0f0f0' }}>
+                                            {slots.map((slot, idx) => (
+                                                <div key={idx} style={{
+                                                    border: '1px solid #f0f0f0',
+                                                    borderRadius: 6,
+                                                    marginTop: 8,
+                                                    padding: '8px 10px',
+                                                    background: '#fff',
+                                                }}>
+                                                    {/* 单行：产品品类 + 数量 + 价格 + 折扣率 + 删除（窄屏自动换行） */}
+                                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                                        <Select
+                                                            id={`sol-cat-${idx}`}
+                                                            showSearch
+                                                            loading={categoriesLoading}
+                                                            value={slot.category || undefined}
+                                                            placeholder="三级品类（必填）"
+                                                            onChange={v => updateSlot(idx, { category: v })}
+                                                            options={level3Categories.map(c => ({ value: c, label: c }))}
+                                                            filterOption={(input, option) =>
+                                                                (option?.label as string ?? '').toLowerCase().includes(input.toLowerCase())
+                                                            }
+                                                            notFoundContent="未找到匹配的三级品类"
+                                                            style={{ width: 120 }}
+                                                        />
+                                                        <InputNumber
+                                                            placeholder="数量"
+                                                            value={slot.quantity}
+                                                            onChange={v => updateSlot(idx, { quantity: v ?? 1 })}
+                                                            min={1}
+                                                            style={{ width: 58 }}
+                                                        />
+                                                        <Text type="secondary" style={{ fontSize: 12 }}>价格</Text>
+                                                        <Select
+                                                            value={slot.price_op || ''}
+                                                            onChange={v => updateSlot(idx, { price_op: (v || '') as '' | 'gt' | 'lt' | 'around' })}
+                                                            options={[
+                                                                { value: '', label: '不限' },
+                                                                { value: 'lt', label: '小于' },
+                                                                { value: 'gt', label: '大于' },
+                                                                { value: 'around', label: '左右' },
+                                                            ]}
+                                                            style={{ width: 76 }}
+                                                        />
+                                                        <InputNumber
+                                                            id={`sol-price-${idx}`}
+                                                            placeholder="可选"
+                                                            value={slot.price}
+                                                            onChange={v => updateSlot(idx, { price: v })}
+                                                            min={0}
+                                                            precision={2}
+                                                            addonAfter="元"
+                                                            disabled={!slot.price_op}
+                                                            style={{ width: 100 }}
+                                                        />
+                                                        <Text type="secondary" style={{ fontSize: 12 }}>折扣率</Text>
+                                                        <Select
+                                                            value={slot.discount_op || ''}
+                                                            onChange={v => updateSlot(idx, { discount_op: (v || '') as '' | 'gt' | 'lt' | 'around' })}
+                                                            options={[
+                                                                { value: '', label: '不限' },
+                                                                { value: 'lt', label: '小于' },
+                                                                { value: 'gt', label: '大于' },
+                                                                { value: 'around', label: '左右' },
+                                                            ]}
+                                                            style={{ width: 76 }}
+                                                        />
+                                                        <InputNumber
+                                                            id={`sol-discount-${idx}`}
+                                                            placeholder="可选"
+                                                            value={slot.discount}
+                                                            onChange={v => updateSlot(idx, { discount: v })}
+                                                            min={0}
+                                                            max={100}
+                                                            precision={1}
+                                                            addonAfter="%"
+                                                            disabled={!slot.discount_op}
+                                                            style={{ width: 100 }}
+                                                        />
+                                                        <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => removeSlot(idx)} />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <Button type="dashed" block icon={<PlusOutlined />} onClick={addSlot} style={{ marginTop: 8 }}>
+                                                添加商品
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        <Space wrap size={[8, 8]}>
+                            <Button type="primary" icon={<SearchOutlined />} onClick={handleAnalyze} loading={loading}>
+                                生成组合方案
+                            </Button>
+                            <Button icon={<FileTextOutlined />} onClick={openHistory}>
+                                历史方案
+                            </Button>
+                            <Button icon={<ColumnHeightOutlined />} onClick={() => setColumnConfigOpen(true)}>
+                                列配置
+                            </Button>
+                            <Divider type="vertical" />
+                            <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>输入方式</Text>
+                                <Switch
+                                    checked={aiMode}
+                                    onChange={v => updateState({ aiMode: v })}
+                                    checkedChildren="AI 智能"
+                                    unCheckedChildren="多块输入"
+                                />
+                            </span>
+                        </Space>
+                        <div style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
+                            {aiMode
+                                ? '提示：输入一段自然语言需求（如：总价500左右，含移动电源、自拍杆各一个，整体折扣率低于70%），AI 将自动解析并生成组合方案'
+                                : '提示：总价为必填项；产品品类（三级品类）、数量必填，价格限制、折扣率可选（选择「不限」或留空则不限制）；点击「添加商品」可增加更多商品信息'}
+                        </div>
+                        {result?.tokens_used ? (
+                            <div style={{ marginTop: 4, color: '#722ed1', fontSize: 12 }}>
+                                本次分析消耗 <strong>{result.tokens_used}</strong> tokens
+                            </div>
+                        ) : null}
+                    </Card>
+                </Col>
+
+                <Col xs={24} md={10}>
+                    {/* 右侧：方案预览 */}
+                    <Card
+                        size="small"
+                        title={
+                            <Space>
+                                <ShoppingCartOutlined />
+                                <span>方案预览</span>
                             </Space>
-                        </div>
-                        <div style={{ color: '#999', fontSize: 12 }}>
-                            提示：输入需求后点击「分析需求」，系统将自动筛选匹配的商品
-                        </div>
-                    </Col>
-                </Row>
-            </Card>
-
-            {/* 筛选条件 */}
-            <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-                <Col span={6}>
-                    <Select placeholder="一级品类" allowClear showSearch value={filterCat1} onChange={v => updateState({ filterCat1: v })}
-                        style={{ width: '100%' }} options={categories.map(c => ({ value: c, label: c }))} />
-                </Col>
-                <Col span={6}>
-                    <Select placeholder="品牌" allowClear showSearch value={filterBrand} onChange={v => updateState({ filterBrand: v })}
-                        style={{ width: '100%' }} options={brands.map(b => ({ value: b, label: b }))} />
-                </Col>
-                <Col span={6}>
-                    <Select placeholder="二级品类" allowClear showSearch value={filterCat2} onChange={v => updateState({ filterCat2: v })}
-                        style={{ width: '100%' }} options={categoryLevel2.map(c => ({ value: c, label: c }))} />
-                </Col>
-                <Col span={6}>
-                    <Select placeholder="三级品类" allowClear showSearch value={filterCat3} onChange={v => updateState({ filterCat3: v })}
-                        style={{ width: '100%' }} options={categoryLevel3.map(c => ({ value: c, label: c }))} />
-                </Col>
-            </Row>
-
-            {/* 第二行：价格 / 折扣率筛选 */}
-            <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-                <Col span={4}>
-                    <Select placeholder="代发价" allowClear value={filterPrice || undefined}
-                        onChange={(v) => updateState({ filterPrice: v || '' })} style={{ width: '100%' }}
-                        options={PRICE_RANGES.map(r => ({ value: r.query, label: r.label }))} />
-                </Col>
-                <Col span={5}>
-                    <Select placeholder="备货商谈价" allowClear value={filterNego || undefined}
-                        onChange={(v) => updateState({ filterNego: v || '' })} style={{ width: '100%' }}
-                        options={PRICE_RANGES.map(r => ({ value: r.query, label: r.label }))} />
-                </Col>
-                <Col span={4}>
-                    <Select placeholder="进货价" allowClear value={filterPurchase || undefined}
-                        onChange={(v) => updateState({ filterPurchase: v || '' })} style={{ width: '100%' }}
-                        options={PRICE_RANGES.map(r => ({ value: r.query, label: r.label }))} />
-                </Col>
-                <Col span={4}>
-                    <Select placeholder="零售价" allowClear value={filterRetail || undefined}
-                        onChange={(v) => updateState({ filterRetail: v || '' })} style={{ width: '100%' }}
-                        options={PRICE_RANGES.map(r => ({ value: r.query, label: r.label }))} />
-                </Col>
-                <Col span={4}>
-                    <Select placeholder="折扣率" allowClear value={filterDiscount || undefined}
-                        onChange={(v) => updateState({ filterDiscount: v || '' })} style={{ width: '100%' }}
-                        options={[
-                            { value: '', label: '全部' },
-                            { value: '折扣率在0到30', label: '≤ 30%' },
-                            { value: '折扣率在30到50', label: '30% - 50%' },
-                            { value: '折扣率在50到70', label: '50% - 70%' },
-                            { value: '折扣率在70到90', label: '70% - 90%' },
-                            { value: '折扣率在90到100', label: '≥ 90%' },
-                        ]} />
-                </Col>
-            </Row>
-
-            <Divider style={{ margin: '8px 0' }} />
-
-            <Row gutter={16}>
-                {/* 左侧：候选商品 / 提示 */}
-                <Col span={result?.total_candidates != null ? (result.total_candidates > 0 ? 16 : 24) : 16}>
-                    {/* 分析结果 */}
-                    {result && (
-                        <>
-                            {result.ai_interpretation && (
-                                <Alert type="success" showIcon icon={<ThunderboltFilled />}
-                                    message={<Text strong>{result.ai_interpretation}</Text>}
-                                    style={{ marginBottom: 12, background: '#fffbe6', border: '1px solid #ffe58f' }} />
-                            )}
-                            <Alert type="info" showIcon message={result.message} style={{ marginBottom: 12 }} />
-
-                            {result.candidates?.filter(c => !c.is_recommended).length > 0 && (
-                                <Card
-                                    title={
-                                        <Space>
-                                            <span>候选商品</span>
-                                            <span style={{ fontSize: 12, color: '#999', fontWeight: 'normal' }}>
-                                                （共 {result.candidates.filter(c => !c.is_recommended).length} 个）
-                                            </span>
-                                        </Space>
-                                    }
-                                    size="small"
-                                >
-                                    <Table
-                                        dataSource={result.candidates.filter(c => !c.is_recommended)}
-                                        columns={candidateColumns}
-                                        rowKey="id"
-                                        size="small"
-                                        pagination={result.total_candidates > 20 ? { pageSize: 20 } : false}
-                                        scroll={{ x: 900 }}
-                                    />
-                                </Card>
-                            )}
-
-                            {/* 推荐产品：单独分区展示 */}
-                            {result.candidates?.filter(c => c.is_recommended).length > 0 && (
-                                <Card
-                                    title={
-                                        <Space>
-                                            <ShopOutlined style={{ color: '#faad14' }} />
-                                            <span>推荐产品（来自关联公司）</span>
-                                        </Space>
-                                    }
-                                    size="small"
-                                    style={{ marginTop: 12, background: '#fffbe6', border: '1px solid #ffe58f' }}
-                                >
-                                    <Table
-                                        dataSource={result.candidates.filter(c => c.is_recommended)}
-                                        columns={recommendedColumns}
-                                        rowKey="id"
-                                        size="small"
-                                        pagination={false}
-                                        scroll={{ x: 900 }}
-                                    />
-                                    <Alert
-                                        type="warning"
-                                        showIcon
-                                        message="推荐产品来自其他公司，如需购买请联系对应公司"
-                                        style={{ marginTop: 8, fontSize: 12 }}
-                                    />
-                                </Card>
-                            )}
-
-                        </>
-                    )}
-
-                    {/* 无结果时显示提示 */}
-                    {!result && (
-                        <div style={{ textAlign: 'center', padding: '60px 0', color: '#999' }}>
-                            <ShoppingCartOutlined style={{ fontSize: 48, color: '#d9d9d9' }} />
-                            <p style={{ marginTop: 16 }}>输入客户需求或选择筛选条件后，点击「分析需求」开始匹配商品</p>
-                        </div>
-                    )}
-                </Col>
-
-                {/* 右侧：方案预览（始终显示） */}
-                <Col span={8}>
-                    <Card title="📋 方案预览" size="small"
-                        extra={
-                            <Space size="small">
-                                <Button size="small" onClick={clearSelected} disabled={selectedItems.size === 0}>清空</Button>
-                                <Button size="small" type="primary" icon={<SaveOutlined />} onClick={handleSave} disabled={selectedItems.size === 0}>保存</Button>
-                                <Button size="small" icon={<DownloadOutlined />} onClick={handleExport} disabled={!savedPlanId}>导出</Button>
-                            </Space>
-                        }>
-                        {renderPreviewCard()}
+                        }
+                        styles={{ body: { padding: '12px' } }}
+                    >
+                        {selectedSolution ? (
+                            <>
+                                <div style={{ marginBottom: 8 }}>
+                                    <Input placeholder="方案名称（可选）" value={solutionName}
+                                        onChange={e => updateState({ solutionName: e.target.value })} size="small" />
+                                </div>
+                                <Divider style={{ margin: '8px 0' }} />
+                                <div style={{ marginBottom: 8 }}>
+                                    <Space direction="vertical" style={{ width: '100%' }}>
+                                        <div><Text type="secondary">商品数：</Text><Text strong>{selectedSolution.total_quantity} 件</Text></div>
+                                        <div><Text type="secondary">总金额：</Text><Text strong style={{ fontSize: 18, color: '#cf1322' }}>¥{selectedSolution.total_price.toFixed(2)}</Text></div>
+                                        <div><Text type="secondary">平均折扣率：</Text><Text strong>{selectedSolution.total_discount_rate.toFixed(1)}%</Text></div>
+                                    </Space>
+                                </div>
+                                <Divider style={{ margin: '8px 0' }} />
+                                {/* 商品明细下拉列表（可收起，无滑动条） */}
+                                <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginBottom: 8, background: '#fafafa', overflow: 'hidden' }}>
+                                    <div
+                                        onClick={() => updateState({ previewItemsOpen: !previewItemsOpen })}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', userSelect: 'none' }}
+                                    >
+                                        <span style={{ color: '#999', display: 'inline-flex' }}>
+                                            {previewItemsOpen ? <DownOutlined /> : <RightOutlined />}
+                                        </span>
+                                        <Text strong style={{ fontSize: 13 }}>商品明细</Text>
+                                        <Tag color="blue" style={{ marginInlineEnd: 0 }}>{selectedSolution.items.length} 件</Tag>
+                                        <Text type="secondary" style={{ fontSize: 12 }}>（点击{previewItemsOpen ? '收起' : '展开'}）</Text>
+                                        <div style={{ flex: 1 }} />
+                                    </div>
+                                    {previewItemsOpen && (
+                                        <div style={{ padding: '0 10px', background: '#fff', borderTop: '1px solid #f0f0f0' }}>
+                                            {selectedSolution.items.map((item, idx) => (
+                                                <div key={idx} style={{
+                                                    padding: '6px 0', borderBottom: idx < selectedSolution.items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                }}>
+                                                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                        <Tooltip title={item.product_name || item.quick_model}>
+                                                            <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                {item.product_name || item.quick_model}
+                                                            </div>
+                                                        </Tooltip>
+                                                        <div style={{ fontSize: 12, color: '#999' }}>
+                                                            {item.quick_model} | {item.brand} | {item.category_level1} | ¥{item.price.toFixed(2)}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ textAlign: 'right', minWidth: 80 }}>
+                                                        <div style={{ fontSize: 13, color: '#cf1322' }}>¥{item.subtotal.toFixed(2)}</div>
+                                                        <div style={{ fontSize: 11, color: '#999' }}>×{item.quantity}</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <Divider style={{ margin: '8px 0' }} />
+                                <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                                    <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} disabled={!selectedSolution}>
+                                        保存方案
+                                    </Button>
+                                    <Button icon={<DownloadOutlined />} onClick={handleExport} disabled={!savedPlanId}>
+                                        导出Excel
+                                    </Button>
+                                    {selectedSolution && (
+                                        <Button icon={<CloseCircleOutlined />} onClick={handleClear} danger size="small">
+                                            清除
+                                        </Button>
+                                    )}
+                                </Space>
+                                {savedPlanId && (
+                                    <Alert type="success" showIcon
+                                        message={<span>已保存（ID: {savedPlanId}），可导出 Excel 表格</span>}
+                                        style={{ marginTop: 8 }} />
+                                )}
+                            </>
+                        ) : (
+                            <div style={{ color: '#999', textAlign: 'center', padding: '40px 0' }}>
+                                <ShoppingCartOutlined style={{ fontSize: 48, color: '#d9d9d9', display: 'block', marginBottom: 16 }} />
+                                <Text type="secondary">请先生成方案，然后选择一个方案查看详情</Text>
+                            </div>
+                        )}
                     </Card>
                 </Col>
             </Row>
 
-            {/* 推荐产品购买提示弹窗 */}
-            <Modal
-                title={
-                    <Space>
-                        <WarningOutlined style={{ color: '#faad14' }} />
-                        <span>以下推荐商品需要联系购买</span>
-                    </Space>
-                }
-                open={purchaseModalOpen}
-                onCancel={() => setPurchaseModalOpen(false)}
-                footer={
-                    <Button type="primary" onClick={() => setPurchaseModalOpen(false)}>
-                        我知道了
-                    </Button>
-                }
-                width={620}
-            >
-                <div style={{ marginBottom: 16 }}>
-                    <Typography.Text type="secondary">
-                        方案中包含来自其他公司的推荐商品，不能直接保存。请分别联系对应公司购买以下商品：
-                    </Typography.Text>
-                </div>
-                {purchaseItems.map((item, idx) => (
-                    <div key={item.id} style={{
-                        padding: '8px 0', borderBottom: idx < purchaseItems.length - 1 ? '1px solid #f0f0f0' : 'none',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                    }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <Tooltip title={item.product_name || item.quick_model}>
-                                <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.product_name || item.quick_model}</div>
-                            </Tooltip>
-                            <div style={{ fontSize: 12, color: '#999' }}>
-                                {item.brand} | 来源：<Tag color={item.source_role === 'super_admin' ? 'red' : 'blue'}>{item.source_company_name || item.source_role}</Tag>
+            {/* 组合方案列表区域 - 全宽 */}
+            {result && (
+                <div style={{ marginTop: 16 }}>
+                    {result.ai_interpretation && (
+                        <Alert type="success" showIcon icon={<ThunderboltFilled />}
+                            message={<Text strong>{result.ai_interpretation}</Text>}
+                            style={{ marginBottom: 12, background: '#fffbe6', border: '1px solid #ffe58f' }} />
+                    )}
+                    {result.total_solutions === 0 && result.diagnosis?.length ? (
+                        <Card
+                            size="small"
+                            style={{
+                                marginBottom: 12,
+                                border: '1px solid #d3adf7',
+                                background: 'linear-gradient(135deg, #f9f0ff 0%, #f0f5ff 100%)',
+                            }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                                <div style={{
+                                    width: 36, height: 36, borderRadius: '50%',
+                                    background: '#722ed1', color: '#fff',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    marginRight: 10, fontSize: 18, flexShrink: 0,
+                                }}>
+                                    <RobotOutlined />
+                                </div>
+                                <div>
+                                    <Text strong style={{ fontSize: 15, color: '#531dab', display: 'block' }}>
+                                        🤖 智能方案诊断
+                                    </Text>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                        系统已自动分析无法生成方案的原因，逐项给出调整建议
+                                    </Text>
+                                </div>
                             </div>
+                            {(result.diagnosis as SolutionDiagnosis[]).map((d, idx) => {
+                                const adj = d.adjust;
+                                const isCategoryPick = adj?.field === 'category';
+                                const hasApplyBtn = !!adj && !isCategoryPick;
+                                return (
+                                    <div key={idx} style={{
+                                        padding: '8px 12px', marginBottom: 8,
+                                        background: 'rgba(255,255,255,0.9)', borderRadius: 8,
+                                        borderLeft: '3px solid #722ed1',
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                                                <Tag color="purple" style={{ marginRight: 6 }}>诊断 {idx + 1}</Tag>
+                                                <Text strong style={{ color: '#531dab' }}>{d.title}</Text>
+                                            </div>
+                                            {hasApplyBtn && (
+                                                <Button
+                                                    size="small"
+                                                    icon={<RocketOutlined />}
+                                                    onClick={() => applyAdjust(d)}
+                                                    style={{
+                                                        flexShrink: 0,
+                                                        marginLeft: 8,
+                                                        background: 'linear-gradient(135deg, #722ed1 0%, #9254de 100%)',
+                                                        border: 'none',
+                                                        color: '#fff',
+                                                        fontWeight: 600,
+                                                        boxShadow: '0 2px 6px rgba(114,46,209,0.35)',
+                                                    }}
+                                                >
+                                                    一键应用建议
+                                                </Button>
+                                            )}
+                                        </div>
+                                        <div style={{ color: '#595959', marginBottom: 4 }}>{d.detail}</div>
+                                        <div>
+                                            <BulbOutlined style={{ color: '#faad14', marginRight: 6 }} />
+                                            <Text strong style={{ color: '#389e0d' }}>建议：</Text>
+                                            <Text style={{ color: '#389e0d' }}>{d.suggestion}</Text>
+                                        </div>
+                                        {isCategoryPick && adj?.slot_index != null && (
+                                            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center' }}>
+                                                <Text style={{ marginRight: 8, color: '#531dab', flexShrink: 0 }}>更换为：</Text>
+                                                <Select
+                                                    showSearch
+                                                    size="small"
+                                                    placeholder="选择其他三级品类"
+                                                    style={{ width: 220 }}
+                                                    options={level3Categories.map((c) => ({ value: c, label: c }))}
+                                                    onChange={(v) => {
+                                                        if (adj.slot_index != null) {
+                                                            const fi = backendToFrontSlotIndex(adj.slot_index);
+                                                            if (!slotsOpen) updateState({ slotsOpen: true });
+                                                            updateSlot(fi, { category: v });
+                                                            flashHighlight(`sol-cat-${fi}`);
+                                                            message.success('✅ 已更换品类（品类选择框已高亮），请点击「生成方案」重新生成');
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </Card>
+                    ) : (
+                        <Alert
+                            type={result.total_solutions > 0 ? 'info' : 'warning'}
+                            showIcon
+                            message={result.message}
+                            style={{ marginBottom: 12 }}
+                        />
+                    )}
+
+                    {result.solutions?.length > 0 && (
+                        <>
+                            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text type="secondary">共 {result.total_solutions} 个方案</Text>
+                                <Button
+                                    size="small"
+                                    icon={sortOrder === 'asc' ? <span>↑</span> : sortOrder === 'desc' ? <span>↓</span> : <span>★</span>}
+                                    onClick={() => {
+                                        // 三态循环：智能（贴近用户输入）→ 升序 → 降序
+                                        const cycle: ('smart' | 'asc' | 'desc')[] = ['smart', 'asc', 'desc'];
+                                        const newOrder = cycle[(cycle.indexOf(sortOrder) + 1) % cycle.length];
+                                        setSortOrder(newOrder);
+                                        let sorted = [...(result?.solutions || [])];
+                                        if (newOrder === 'asc') {
+                                            sorted.sort((a, b) => a.total_price - b.total_price);
+                                        } else if (newOrder === 'desc') {
+                                            sorted.sort((a, b) => b.total_price - a.total_price);
+                                        }
+                                        // 'smart' 不排序，保留后端"最接近用户输入"的顺序
+                                        updateState({
+                                            result: result ? { ...result, solutions: sorted } : null
+                                        });
+                                    }}
+                                >
+                                    按价格 {sortOrder === 'asc' ? '升序' : sortOrder === 'desc' ? '降序' : '智能'}
+                                </Button>
+                            </div>
+                            <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                                {result.solutions.map((sol: SolutionCombination, idx: number) => (
+                                    <Card
+                                        key={idx}
+                                        size="small"
+                                        style={{
+                                            marginBottom: 12,
+                                            cursor: 'pointer',
+                                            border: selectedSolutionIdx === idx ? '2px solid #1677ff' : '1px solid #f0f0f0',
+                                            background: selectedSolutionIdx === idx ? '#f0f5ff' : '#fff',
+                                        }}
+                                        onClick={() => selectSolution(idx)}
+                                        title={
+                                            <Space>
+                                                <CheckCircleOutlined style={{
+                                                    color: selectedSolutionIdx === idx ? '#1677ff' : '#d9d9d9',
+                                                    fontSize: 16,
+                                                }} />
+                                                <Text strong>方案 {idx + 1}</Text>
+                                                <Tag color="blue">¥{sol.total_price.toFixed(2)}</Tag>
+                                                <Tag color="green">{sol.total_quantity} 件</Tag>
+                                                <Tag color="orange">{sol.total_discount_rate.toFixed(1)}%</Tag>
+                                            </Space>
+                                        }
+                                        extra={
+                                            selectedSolutionIdx === idx
+                                                ? <Tag color="success" icon={<CheckCircleOutlined />}>已选</Tag>
+                                                : null
+                                        }
+                                    >
+                                        <Table
+                                            dataSource={sol.items}
+                                            columns={solutionItemColumns}
+                                            rowKey="product_id"
+                                            size="small"
+                                            pagination={false}
+                                            summary={() => (
+                                                <Table.Summary.Row>
+                                                    <Table.Summary.Cell index={0} colSpan={5}>
+                                                        <Text strong style={{ float: 'right' }}>合计：</Text>
+                                                    </Table.Summary.Cell>
+                                                    <Table.Summary.Cell index={1}>
+                                                        <Text strong style={{ color: '#cf1322' }}>¥{sol.total_price.toFixed(2)}</Text>
+                                                    </Table.Summary.Cell>
+                                                </Table.Summary.Row>
+                                            )}
+                                        />
+                                    </Card>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                    {!result.solutions?.length && !result.ai_interpretation && (
+                        <div style={{ textAlign: 'center', padding: '80px 0', color: '#999' }}>
+                            <Title level={4} type="secondary" style={{ fontWeight: 'normal' }}>
+                                输入产品组合需求，生成最优搭配方案
+                            </Title>
+                            <Text type="secondary">
+                                例如：我需要一个价值500元的礼盒，包含三个产品...
+                            </Text>
                         </div>
-                        <Text strong style={{ color: '#cf1322', fontSize: 16, whiteSpace: 'nowrap' }}>¥{item.price.toFixed(2)}</Text>
-                    </div>
-                ))}
-                <div style={{ marginTop: 16, padding: 12, background: '#fff7e6', borderRadius: 6 }}>
-                    <Typography.Text type="warning">
-                        💡 提示：请将推荐商品从购物车中移除后再保存方案，或直接联系对应公司采购。
-                    </Typography.Text>
+                    )}
                 </div>
-            </Modal>
+            )}
+
+            {/* 无结果时的默认提示 */}
+            {!result && (
+                <div style={{ textAlign: 'center', padding: '80px 0', color: '#999' }}>
+                    <Title level={4} type="secondary" style={{ fontWeight: 'normal' }}>
+                        输入产品组合需求，生成最优搭配方案
+                    </Title>
+                    <Text type="secondary">
+                        例如：我需要一个价值500元的礼盒，包含三个产品...
+                    </Text>
+                </div>
+            )}
+
+            {/* 推荐方案区域 */}
+            {recommendedSolutions.length > 0 && (
+                <>
+                    <Divider style={{ margin: '16px 0 8px' }} />
+                    <Card
+                        size="small"
+                        title={
+                            <Space>
+                                <ShopOutlined style={{ color: '#52c41a' }} />
+                                <span style={{ fontWeight: 500 }}>推荐方案</span>
+                                <Tag color="success">来自其他公司</Tag>
+                                <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+                                    以下为使用其他公司商品生成的推荐方案，可供参考
+                                </Typography.Text>
+                            </Space>
+                        }
+                        style={{ background: '#f6ffed', border: '1px solid #b7eb8f', marginTop: 8 }}
+                    >
+                        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                            {recommendedSolutions.map((sol: any, idx: number) => (
+                                <Card
+                                    key={idx}
+                                    size="small"
+                                    style={{ marginBottom: 8, border: '1px solid #d9f7be' }}
+                                    title={
+                                        <Space>
+                                            <Text strong>推荐方案 {idx + 1}</Text>
+                                            <Tag color="blue">¥{sol.total_price?.toFixed(2)}</Tag>
+                                            <Tag color="green">{sol.total_quantity} 件</Tag>
+                                            {sol.source_company_name && (
+                                                <Tag color={sol.source_role === 'super_admin' ? 'red' : 'blue'}>
+                                                    {sol.source_company_name}
+                                                </Tag>
+                                            )}
+                                        </Space>
+                                    }
+                                >
+                                    <Table
+                                        dataSource={sol.items || []}
+                                        columns={[
+                                            { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 120, ellipsis: true },
+                                            { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: true },
+                                            { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
+                                            { title: '单价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => `¥${v?.toFixed(2) || '0.00'}` },
+                                            { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 50 },
+                                            { title: '小计', dataIndex: 'subtotal', key: 'subtotal', width: 80, render: (v: number) => <span style={{ color: '#cf1322' }}>¥{v?.toFixed(2) || '0.00'}</span> },
+                                        ]}
+                                        rowKey="product_id"
+                                        size="small"
+                                        pagination={false}
+                                    />
+                                </Card>
+                            ))}
+                        </div>
+                    </Card>
+                </>
+            )}
+
+            {/* 推荐产品区域 */}
+            {recommendedProducts.length > 0 && (
+                <>
+                    <Divider style={{ margin: '16px 0 8px' }} />
+                    <Card
+                        size="small"
+                        title={
+                            <Space>
+                                <ShopOutlined style={{ color: '#faad14' }} />
+                                <span style={{ fontWeight: 500 }}>推荐产品</span>
+                                <Tag color="warning">来自其他公司</Tag>
+                                <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+                                    以下为推荐产品，来自其他公司，可供参考
+                                </Typography.Text>
+                            </Space>
+                        }
+                        style={{ background: '#fffbe6', border: '1px solid #ffe58f', marginTop: 8 }}
+                    >
+                        <Table
+                            dataSource={recommendedProducts}
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            scroll={{ x: 800 }}
+                            columns={[
+                                { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: { showTitle: false }, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                                { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 150, ellipsis: { showTitle: false }, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                                { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
+                                {
+                                    title: '图片', key: 'image', width: 65,
+                                    render: (_: unknown, r: RecommendedProduct) => {
+                                        if (!r.image) return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
+                                        const src = r.image.startsWith('data:') ? r.image : `data:image/png;base64,${r.image}`;
+                                        return (
+                                            <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
+                                                <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+                                            </Tooltip>
+                                        );
+                                    },
+                                },
+                                { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => <span style={{ color: '#cf1322', fontWeight: 600 }}>¥{Number(v).toFixed(2)}</span> },
+                                {
+                                    title: '来源公司', dataIndex: 'source_company_name', key: 'source_company_name', width: 120,
+                                    render: (v: string, r: RecommendedProduct) => (
+                                        <Tag color={r.source_role === 'super_admin' ? 'red' : 'blue'}>{v || r.source_role}</Tag>
+                                    ),
+                                },
+                            ]}
+                        />
+                        <div style={{ textAlign: 'center', marginTop: 8, color: '#999', fontSize: 12 }}>
+                            如需购买推荐产品，可联系对应公司
+                        </div>
+                    </Card>
+                </>
+            )}
+
+            {/* 列显示配置对话框 */}
+            <ColumnDisplayConfig
+                open={columnConfigOpen}
+                pageType={pageTypeForConfig}
+                title="方案商品列显示配置"
+                onClose={() => setColumnConfigOpen(false)}
+                onSaved={() => loadSolutionColumnConfig()}
+            />
 
             {/* 历史方案对话框 */}
             <Modal title="📂 历史方案" open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={680} destroyOnHidden>
@@ -701,8 +1358,9 @@ export default function SolutionPage() {
                         pagination={false}
                         scroll={{ x: 640 }}
                         columns={[
-                            { title: '方案名称', dataIndex: 'name', key: 'name', width: 130, ellipsis: true, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-                            { title: '需求摘要', dataIndex: 'requirement', key: 'requirement', width: 180, ellipsis: true, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                            { title: '方案名称', dataIndex: 'name', key: 'name', width: 130, ellipsis: { showTitle: false }, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                            { title: '需求摘要', dataIndex: 'requirement', key: 'requirement', width: 160, ellipsis: { showTitle: false }, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                            { title: '商品数', dataIndex: 'items_count', key: 'items_count', width: 55, render: (v: number) => v ?? '-' },
                             { title: '金额', dataIndex: 'total_amount', key: 'total_amount', width: 70, render: (v: number) => `¥${(v || 0).toFixed(2)}` },
                             { title: '状态', dataIndex: 'status', key: 'status', width: 50, render: (v: string) => v === 'draft' ? '草稿' : v },
                             { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 130 },

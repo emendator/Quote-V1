@@ -4,8 +4,6 @@ import zhCN from 'antd/locale/zh_CN';
 import AppLayout from './components/Layout';
 import HomePage from './pages/HomePage';
 import DataManagePage from './pages/DataManagePage';
-import PlatformManagePage from './pages/PlatformManagePage';
-import ListingLogsPage from './pages/ListingLogsPage';
 import SolutionPage from './pages/SolutionPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -36,8 +34,6 @@ function App() {
                         }>
                             <Route path="/" element={<HomePage />} />
                             <Route path="/data" element={<DataManagePage />} />
-                            <Route path="/platforms" element={<PlatformManagePage />} />
-                            <Route path="/listing-logs" element={<ListingLogsPage />} />
                             <Route path="/solutions" element={<SolutionPage />} />
                             <Route path="/invite-codes" element={
                                 <RequireAuth roles={['super_admin', 'admin']}><InviteCodePage /></RequireAuth>

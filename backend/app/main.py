@@ -1,16 +1,19 @@
 """FastAPI 应用入口"""
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from app.config import CORS_ORIGINS, HOST, PORT
-from app.database import init_db
-from app.routers import products, import_data, query, platforms, solutions, auth, invites
+from app.config import CORS_ORIGINS, HOST, PORT, JWT_SECRET_KEY, JWT_SECRET_KEY_DEFAULT
+from app.database import init_db, sync_engine
+from app.routers import products, import_data, query, solutions, auth, invites, column_display, company
 from app.services.cleanup_service import clean_all, FILE_MAX_AGE_HOURS, CLEANUP_INTERVAL_HOURS
+from app.utils.crypto_utils import encrypt_api_key, hash_username
+from sqlalchemy import text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
@@ -31,7 +34,32 @@ async def periodic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库并开始定时清理"""
+    # 安全提醒：若未通过环境变量覆盖 JWT_SECRET_KEY（其同时用于敏感信息加密），给出醒目提示
+    if JWT_SECRET_KEY == JWT_SECRET_KEY_DEFAULT:
+        logger.warning("当前使用默认 JWT_SECRET_KEY，生产环境请务必通过环境变量 JWT_SECRET_KEY 设置随机密钥（该密钥同时用于用户名/API Key 等敏感信息加密）")
     await init_db()
+    # 初始化最高级管理员的 API Key（仅从环境变量读取；未配置则不写入，避免密钥硬编码在源码中）
+    _default_admin_key = os.getenv("ADMIN_API_KEY", "")
+    if _default_admin_key:
+        try:
+            with sync_engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT id, api_key FROM users WHERE username_hash = :h"),
+                    {"h": hash_username("admin")}
+                ).fetchone()
+                if row and not row[1]:
+                    encrypted = encrypt_api_key(_default_admin_key)
+                    conn.execute(
+                        text("UPDATE users SET api_key = :key WHERE id = :id"),
+                        {"key": encrypted, "id": row[0]}
+                    )
+                    conn.commit()
+                    logger.info("已初始化最高级管理员的 DeepSeek API Key")
+        except Exception as e:
+            logger.warning(f"初始化 API Key 跳过: {e}")
+    else:
+        logger.warning("未设置 ADMIN_API_KEY 环境变量，最高级管理员 API Key 未自动初始化（可在个人菜单手动配置）")
+
     # 启动时立即执行一次清理
     result = clean_all()
     if result["files_removed"] > 0 or result["cache_entries_removed"] > 0:
@@ -67,10 +95,11 @@ app.add_middleware(
 app.include_router(products.router)
 app.include_router(import_data.router)
 app.include_router(query.router)
-app.include_router(platforms.router)
 app.include_router(solutions.router)
 app.include_router(auth.router)
 app.include_router(invites.router)
+app.include_router(column_display.router)
+app.include_router(company.router)
 
 
 # 健康检查

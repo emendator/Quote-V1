@@ -1,75 +1,66 @@
-"""智能方案服务 —— 客户需求分析、商品筛选、方案管理、DOCX 导出"""
+"""智能方案服务 —— 客户需求分析、商品筛选、方案管理、Excel 导出"""
 import io
 import re
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
-import httpx
-from sqlalchemy import select, text, or_, and_
+from typing import List, Dict, Any, Optional, Tuple
+from sqlalchemy import text
 from app.database import sync_engine
-from app.models import Product
-from app.services.query_engine import query_engine
-from app.config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL
+from app.services.api_key_service import call_deepseek_with_user_key
+from app.utils.excel_utils import add_image_embedded_in_cell, normalize_datetime_string
 
 logger = logging.getLogger("solution_service")
 
-# DeepSeek 提示词：分析客户项目需求（基础模板，运行时动态拼接参考数据）
-SOLUTION_SYSTEM_PROMPT = """你是一个智能报价系统的方案顾问。请从客户需求中提取结构化信息，以 JSON 格式返回。
+# DeepSeek 提示词：分析产品组合需求，提取组合约束条件（v3.0，适配多块输入结构）
+SOLUTION_SYSTEM_PROMPT = """你是一个智能报价系统的产品组合方案顾问。用户会提出产品组合需求（如礼盒搭配），请从需求中提取组合约束条件，以 JSON 格式返回。
 
-数据库字段及别称（用户可能使用任意一种）：
-品牌/牌子 → brand
-品类/分类 → category_level1 / category_level2 / category_level3
-代发价/报价/价格 → price
-进货价/进价/成本价 → purchase_price
-零售价 → retail_price
-投标价 → bid_price  集采价 → group_purchase_price
-新活动价 → new_event_price  备货商谈价 → negotiation_price
-运费 → shipping_fee  毛重/重量 → gross_weight
-折扣率 → discount_rate  销量 → sales_volume
-供货状态 → supply_status  规格 → specification
-快查型号 → quick_model  型号/货号 → product_model
-产品名称 → product_name  69码 → barcode_69
-箱规 → box_spec  合作等级 → cooperation_level
-链接 → shop_url  备注 → remark
+约束字段说明（与系统的多块输入结构一致）：
+- total_price: 目标总价（数字，如 500）
+- total_price_op: 总价限制方式，取值为 "gt"(大于) / "lt"(小于) / "around"(左右)
+- max_discount_rate: 总折扣率限制值（数字，如 70；无限制则为 null）
+- max_discount_op: 总折扣率限制方式，取值为 "gt"(大于) / "lt"(小于) / "around"(左右)，无限制则为 null
+- items: 数组，每个元素代表一个商品位置的约束，包含：
+  - category: 三级品类（字符串，务必从参考数据 category_level3 中精确匹配，不要编造）
+  - quantity: 数量（整数，默认 1）
+  - price_op: 该商品价格限制方式 "gt"(大于) / "lt"(小于) / "around"(左右)，无限制则为 ""
+  - price: 该商品价格限制值（数字；无限制则为 null）
+  - discount_op: 该商品折扣率限制方式 "gt"(大于) / "lt"(小于) / "around"(左右)，无限制则为 ""
+  - discount: 该商品折扣率限制值（数字，百分比；无限制则为 null）
 
 JSON 格式：
 {{
-  "brand": "品牌名",
-  "category_level1": "一级品类",
-  "category_level2": "二级品类",
-  "category_level3": "三级品类",
-  "price_min": 最低代发价, "price_max": 最高代发价,
-  "purchase_price_min": 最低进价, "purchase_price_max": 最高进价,
-  "retail_price_min": 最低零售价, "retail_price_max": 最高零售价,
-  "negotiation_price_min": ..., "negotiation_price_max": ...,
-  "bid_price_min": ..., "bid_price_max": ...,
-  "group_purchase_price_min": ..., "group_purchase_price_max": ...,
-  "new_event_price_min": ..., "new_event_price_max": ...,
-  "shipping_fee_min": ..., "shipping_fee_max": ...,
-  "gross_weight_min": ..., "gross_weight_max": ...,
-  "discount_rate_min": ..., "discount_rate_max": ...,
-  "sales_volume_min": 最低销量,
-  "supply_status": "供货状态",
-  "specification": "规格",
-  "keywords": ["其他关键词"],
+  "total_price": 目标总价,
+  "total_price_op": "around",
+  "max_discount_rate": 70,
+  "max_discount_op": "lt",
+  "items": [
+    {{"category": "三级品类1", "quantity": 1, "price_op": "gt", "price": 300, "discount_op": "", "discount": null}},
+    {{"category": "三级品类2", "quantity": 2, ...}}
+  ],
   "summary": "需求摘要"
 }}
 
-示例：
-输入："进一批200元以下的飞利浦插线板"
-输出：{"brand": "飞利浦", "category_level2": "插线板", "purchase_price_max": 200, "keywords": [], "summary": "进一批200元以下的飞利浦插线板"}
+示例1：
+输入："我要一个价值500的礼盒，其中包含三个产品，整体的折扣率需要低于70%，产品分别是移动电源、自拍杆、数据线，其中移动电源价值不低于300，剩下两个随意"
+输出：{{"total_price": 500, "total_price_op": "around", "max_discount_rate": 70, "max_discount_op": "lt", "items": [{{"category": "移动电源", "quantity": 1, "price_op": "gt", "price": 300}}, {{"category": "自拍杆", "quantity": 1}}, {{"category": "数据线", "quantity": 1}}], "summary": "价值500礼盒：移动电源(≥300)+自拍杆+数据线"}}
 
-输入："需要20个华为充电宝50-100元"
-输出：{"brand": "华为", "category_level2": "充电宝", "price_min": 50, "price_max": 100, "keywords": [], "summary": "华为充电宝50-100元"}
+示例2：
+输入："需要搭配一个500元以内的礼品包，放三个产品，要一个飞利浦的小家电价值200以上，一个华为的电子产品价值100以上，再来一个随意"
+输出：{{"total_price": 500, "total_price_op": "lt", "max_discount_rate": null, "max_discount_op": null, "items": [{{"category": "小家电", "quantity": 1, "price_op": "gt", "price": 200}}, {{"category": "电子产品", "quantity": 1, "price_op": "gt", "price": 100}}, {{"category": "商品", "quantity": 1}}], "summary": "500元礼品包：小家电(≥200)+电子产品(≥100)+随意"}}
 
-输入："找零售价300以内的飞利浦排插新款"
-输出：{"brand": "飞利浦", "category_level2": "排插", "retail_price_max": 300, "keywords": ["新款"], "summary": "飞利浦排插零售价300以内"}
+示例3：
+输入："帮我找三个产品凑到300块，都要是日用品，其中一个不能低于100"
+输出：{{"total_price": 300, "total_price_op": "around", "max_discount_rate": null, "max_discount_op": null, "items": [{{"category": "日用品", "quantity": 1}}, {{"category": "日用品", "quantity": 1}}, {{"category": "日用品", "quantity": 1, "price_op": "gt", "price": 100}}], "summary": "三个日用品凑300元"}}
 
 规则：
-- 品牌和品类必须从下方的参考数据中精确匹配，不要编造
-- "xx以下/以内" → _max；"xx以上/以上" → _min
-- 无法识别的关键词放 keywords 数组
+- 数量识别："三个"=3、"两件"=2，写入对应 item 的 quantity；若商品总数大于 item 数，补足空 item
+- "xx以下/以内/不超过/低于/最多" → price_op="lt"；"xx以上/不低于/至少/超过" → price_op="gt"；"xx左右/上下/大概/约" → price_op="around"
+- 总价："总价不超过X" → total_price_op="lt"；"总价不低于X" → "gt"；"总价X左右/大约" → "around"
+- 折扣率同理用 discount_op / discount（百分比数字）
+- "随意/都可以/任意" 表示该位置无价格/折扣约束（price_op=""，price=null）
+- 品类必须从参考数据 category_level3 列表中精确匹配（把用户口语化表达映射到最接近的三级品类）
+- 如果需求没有明确总价，total_price 用 null；无折扣率则 max_discount_rate / max_discount_op 用 null
 - 只返回 JSON，不要额外解释
 """
 
@@ -77,128 +68,47 @@ JSON 格式：
 class SolutionService:
     """智能方案服务"""
 
-    # ========== 规则引擎分析 ==========
-
-    def _parse_by_rules(self, requirement: str) -> Dict[str, Any]:
-        """通过规则引擎解析客户需求"""
-        intent: Dict[str, Any] = {}
-        text = requirement.strip()
-        if not text:
-            intent["summary"] = ""
-            return intent
-
-        # 品牌提取（支持 "品牌为飞利浦" 和 "飞利浦" 等常见表述）
-        brand_match = re.search(r"(?:品牌|牌子)[是为]?\s*(.{1,20}?)(?:的|商品|产品|报价|价格|，|。|$)", text)
-        if brand_match:
-            intent["brand"] = brand_match.group(1).strip()
-        else:
-            # 检查常见品牌名称（中文品牌通常2-4字）
-            known_brands = ["飞利浦", "华为", "小米", "苹果", "三星", "联想", "戴尔", "索尼", "松下", "美的",
-                           "格力", "海尔", "海信", "TCL", "长虹", "创维", "康佳", "奥克斯", "苏泊尔", "九阳",
-                           "公牛", "绿联", "倍思", "安克", "罗马仕", "品胜", "爱国者"]
-            for brand in known_brands:
-                if brand in text:
-                    intent["brand"] = brand
-                    break
-
-        # 价格区间提取
-        price_range = re.search(r"(?:价格|报价|价位|单价)[在为]?\s*(\d+\.?\d*)\s*[~\-–到至]\s*(\d+\.?\d*)\s*(?:元|块)?", text)
-        if price_range:
-            intent["price_min"] = float(price_range.group(1))
-            intent["price_max"] = float(price_range.group(2))
-        else:
-            price_lt = re.search(r"(?:价格|报价|价位)[在为]?\s*(?:小于|低于|不超过|以下)\s*(\d+\.?\d*)", text)
-            price_gt = re.search(r"(?:价格|报价|价位)[在为]?\s*(?:大于|高于|超过|以上)\s*(\d+\.?\d*)", text)
-            if price_lt:
-                intent["price_max"] = float(price_lt.group(1))
-            elif price_gt:
-                intent["price_min"] = float(price_gt.group(1))
-
-        # 品类提取
-        cat1_match = re.search(r"(?:一级品类|大类)[是为]?\s*(.{1,20}?)(?:的|商品|产品|，|。|$)", text)
-        if cat1_match:
-            intent["category_level1"] = cat1_match.group(1).strip()
-        cat2_match = re.search(r"(?:二级品类|品类|类别|分类)[是为]?\s*(.{1,20}?)(?:的|商品|产品|，|。|$)", text)
-        if cat2_match:
-            intent["category_level2"] = cat2_match.group(1).strip()
-
-        # 规格关键词
-        spec_match = re.search(r"(?:规格|包装)[是为]?\s*(.{1,20}?)(?:的|商品|产品|，|。|$)", text)
-        if spec_match:
-            intent["specification"] = spec_match.group(1).strip()
-
-        # 供货状态
-        status_match = re.search(r"(?:供货|在售|状态)[是为]?\s*(.{1,10}?)(?:的|商品|产品|，|。|$)", text)
-        if status_match:
-            intent["supply_status"] = status_match.group(1).strip()
-
-        # 检测输入是否为型号列表（每行/每段是一个型号模式，如 SPB4034W/93）
-        model_lines = [l.strip() for l in re.split(r'[\n\r,，、\s]+', text) if l.strip()]
-        model_pattern = r'^[A-Za-z0-9]+[A-Za-z0-9/\-_.]{2,}$'
-        is_model_list = (
-            len(model_lines) >= 2
-            and all(re.match(model_pattern, ml) for ml in model_lines)
-        )
-
-        if is_model_list:
-            # 完整保留型号，不分词、不删数字
-            intent["model_numbers"] = model_lines
-        else:
-            # 提取关键词：去掉已识别的品牌名后，剩余的所有非停用词作为关键词搜索
-            remaining = text
-            for v in intent.values():
-                if isinstance(v, str) and v:
-                    remaining = remaining.replace(v, "")
-            # 清理剩余文本中的标点、空格等
-            remaining = re.sub(r'[，。、！？：；""\'\'（）【】《》\s\d.]+', " ", remaining).strip()
-            keywords = [kw.strip() for kw in remaining.split() if kw.strip() and len(kw.strip()) >= 2]
-
-            if keywords:
-                intent["keywords"] = keywords
-            # 如果没有任何结构化条件也没有关键词，把整个文本当作关键词搜索
-            elif not any(k in intent for k in ["brand", "category_level1", "category_level2",
-                                                "category_level3", "price_min", "price_max",
-                                                "specification", "supply_status"]):
-                # 按常见分隔符拆分文本
-                parts = re.split(r"[\s,，、]+", text)
-                intent["keywords"] = [p.strip() for p in parts if p.strip() and len(p.strip()) >= 1]
-
-        intent["summary"] = text[:100] if len(text) > 100 else text
-        return intent
-
     # ========== AI 分析 ==========
 
-    def _get_reference_data(self) -> str:
-        """从数据库采样参考数据，帮助 AI 理解实际存在的值"""
+    def _get_reference_data(self, company_id: int = 0) -> str:
+        """从数据库采样参考数据，帮助 AI 理解实际存在的值（仅在用户公司范围内）"""
         try:
             with sync_engine.connect() as conn:
-                # 品牌（全部数据供AI匹配）
+                company_filter = " AND company_id=:company_id" if company_id else ""
+                company_params = {"company_id": company_id} if company_id else {}
+
+                # 品牌（当前公司数据供AI匹配）
                 brand_rows = conn.execute(
-                    text("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != '' ORDER BY brand LIMIT 200")
+                    text("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''" + company_filter + " ORDER BY brand LIMIT 200"),
+                    company_params
                 ).fetchall()
                 brands = [r[0] for r in brand_rows if r[0]]
 
-                # 一级品类（全部数据供AI匹配）
+                # 一级品类
                 cat1_rows = conn.execute(
-                    text("SELECT DISTINCT category_level1 FROM products WHERE category_level1 IS NOT NULL AND category_level1 != '' ORDER BY category_level1 LIMIT 200")
+                    text("SELECT DISTINCT category_level1 FROM products WHERE category_level1 IS NOT NULL AND category_level1 != ''" + company_filter + " ORDER BY category_level1 LIMIT 200"),
+                    company_params
                 ).fetchall()
                 cat1_list = [r[0] for r in cat1_rows if r[0]]
 
-                # 二级品类（全部数据供AI匹配）
+                # 二级品类
                 cat2_rows = conn.execute(
-                    text("SELECT DISTINCT category_level2 FROM products WHERE category_level2 IS NOT NULL AND category_level2 != '' ORDER BY category_level2 LIMIT 200")
+                    text("SELECT DISTINCT category_level2 FROM products WHERE category_level2 IS NOT NULL AND category_level2 != ''" + company_filter + " ORDER BY category_level2 LIMIT 200"),
+                    company_params
                 ).fetchall()
                 cat2_list = [r[0] for r in cat2_rows if r[0]]
 
-                # 三级品类（全部数据供AI匹配）
+                # 三级品类
                 cat3_rows = conn.execute(
-                    text("SELECT DISTINCT category_level3 FROM products WHERE category_level3 IS NOT NULL AND category_level3 != '' ORDER BY category_level3 LIMIT 200")
+                    text("SELECT DISTINCT category_level3 FROM products WHERE category_level3 IS NOT NULL AND category_level3 != ''" + company_filter + " ORDER BY category_level3 LIMIT 200"),
+                    company_params
                 ).fetchall()
                 cat3_list = [r[0] for r in cat3_rows if r[0]]
 
                 # 供货状态（示例1个）
                 status_row = conn.execute(
-                    text("SELECT DISTINCT supply_status FROM products WHERE supply_status IS NOT NULL AND supply_status != '' LIMIT 1")
+                    text("SELECT DISTINCT supply_status FROM products WHERE supply_status IS NOT NULL AND supply_status != ''" + company_filter + " LIMIT 1"),
+                    company_params
                 ).fetchone()
                 status_val = status_row[0] if status_row else None
 
@@ -221,493 +131,624 @@ class SolutionService:
             logger.warning(f"获取参考数据失败: {e}")
             return ""
 
-    async def _parse_by_ai(self, requirement: str, reference_data: str = "") -> Optional[Dict[str, Any]]:
-        """通过 DeepSeek API 分析客户需求"""
+    async def _parse_by_ai(self, requirement: str, reference_data: str = "",
+                           company_id: int = 0, user_id: int = 0) -> Tuple[Optional[Dict[str, Any]], int]:
+        """通过 DeepSeek API 分析客户需求，返回 (结果, 消耗token数)"""
         # 构建提示词：基础模板 + 参考数据
         system_content = SOLUTION_SYSTEM_PROMPT
         if reference_data:
             system_content = system_content + "\n\n" + reference_data
 
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": DEEPSEEK_MODEL,
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": requirement},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 1024,
-            "stream": False,
-        }
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": requirement},
+        ]
+
+        # 优先使用 user_id 对应的 API Key，否则按公司名查找
+        data, tokens_used = await call_deepseek_with_user_key(
+            user_id=user_id,
+            messages=messages,
+            max_tokens=2048,
+            temperature=0.1,
+        )
+        if not data:
+            return None, 0
+
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(DEEPSEEK_API_URL, headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.startswith("```"):
-                    content = content[3:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                return json.loads(content.strip())
+            content = data["choices"][0]["message"]["content"].strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            return json.loads(content.strip()), tokens_used
         except Exception as e:
             logger.error(f"DeepSeek API 调用失败: {e}")
-            return None
+            return None, tokens_used
 
-    # ========== 商品筛选 ==========
+    # ========== 规则引擎解析组合约束 ==========
 
-    def _query_candidates(self, intent: Dict[str, Any], owner_id: Optional[int] = None) -> tuple:
-        """根据分析结果从数据库筛选商品，支持多级回退，返回 (results, total, strategy_used)"""
-        structured_conditions = []
-        structured_params = {}
-        keyword_conditions = []
-        keyword_params = {}
+    def _parse_combination_by_rules(self, requirement: str) -> Dict[str, Any]:
+        """通过规则引擎解析产品组合需求（非AI模式），适配各种口语化表述"""
+        constraints: Dict[str, Any] = {"items": []}
+        text = requirement.strip()
+        if not text:
+            return constraints
 
-        # 结构化条件
-        if intent.get("brand"):
-            structured_conditions.append("brand LIKE :brand")
-            structured_params["brand"] = f"%{intent['brand']}%"
+        # ---- 总价 / 价格范围 ----
+        # 匹配"价值500"、"总价500"、"预算500"、"500元以内/左右"、"不超过500"、"100以内"等
+        total_patterns = [
+            # "总价/价格/价值 300" 等
+            r"(?:价值|总价|总共|合计|一共|预算|整体价格|总价格|价格)[约为]?\s*(\d+\.?\d*)\s*(?:元|块)?",
+            # "X元以内/以下/左右/上下/不超过/不高于/以上/至少"
+            r"(\d+\.?\d*)\s*元\s*(?:以内|以下|左右|上下|不超过|不高于|以上|至少)",
+            # "X以内/以下/之内"（无"元"字，如"100以内的充电宝"）
+            r"(\d+\.?\d*)\s*(?:元|块)?\s*(?:以内|以下|之内)",
+            # "不超过/不高于/少于/低于/大概/大约/约 X元"
+            r"(?:不超过|不高于|少于|低于|大概|大约|约)\s*(\d+\.?\d*)\s*(?:元|块)",
+            # "再X左右/上下"、"共X左右"（没有"元"字）
+            r"[再共约]\s*(\d+\.?\d*)\s*(?:元|块)?\s*(?:左右|上下)",
+            # 纯"X左右/上下"（无前缀）
+            r"(\d+\.?\d*)\s*(?:元|块)?\s*(?:左右|上下)",
+        ]
+        matched_phrases = []
+        total_price_cap = None  # "X以内/以下" 表示严格上限（不应用容差）
+        for pat in total_patterns:
+            m = re.search(pat, text)
+            if m:
+                constraints["total_price"] = float(m.group(1))
+                matched_phrases.append(m.group(0))
+                # "以内/以下/之内/不超过/不高于" → 严格上限
+                if any(k in m.group(0) for k in ["以内", "以下", "之内", "不超过", "不高于"]):
+                    total_price_cap = float(m.group(1))
+                break
 
-        if intent.get("category_level1"):
-            structured_conditions.append("category_level1 LIKE :cat1")
-            structured_params["cat1"] = f"%{intent['category_level1']}%"
+        # ---- 商品数量 ----
 
-        if intent.get("category_level2"):
-            structured_conditions.append("category_level2 LIKE :cat2")
-            structured_params["cat2"] = f"%{intent['category_level2']}%"
-
-        if intent.get("category_level3"):
-            structured_conditions.append("category_level3 LIKE :cat3")
-            structured_params["cat3"] = f"%{intent['category_level3']}%"
-
-        if intent.get("specification"):
-            structured_conditions.append("specification LIKE :spec")
-            structured_params["spec"] = f"%{intent['specification']}%"
-
-        if intent.get("supply_status"):
-            structured_conditions.append("supply_status LIKE :status")
-            structured_params["status"] = f"%{intent['supply_status']}%"
-
-        # --- 多价格/数值字段范围 ---
-        price_field_map = {
-            "price": "price",
-            "purchase_price": "purchase_price",
-            "retail_price": "retail_price",
-            "negotiation_price": "negotiation_price",
-            "bid_price": "bid_price",
-            "group_purchase_price": "group_purchase_price",
-            "new_event_price": "new_event_price",
-            "shipping_fee": "shipping_fee",
-            "gross_weight": "gross_weight",
-        }
-        for field, col in price_field_map.items():
-            min_key = f"{field}_min"
-            max_key = f"{field}_max"
-            if intent.get(min_key) is not None:
-                structured_conditions.append(f"{col} >= :{min_key}")
-                structured_params[min_key] = intent[min_key]
-            if intent.get(max_key) is not None:
-                structured_conditions.append(f"{col} <= :{max_key}")
-                structured_params[max_key] = intent[max_key]
-
-        # discount_rate 是计算字段（price / retail_price * 100），没有独立列，需用表达式
-        dr_min = intent.get("discount_rate_min")
-        dr_max = intent.get("discount_rate_max")
-        if dr_min is not None:
-            structured_conditions.append("(price * 100.0 / NULLIF(retail_price, 0)) >= :dr_min")
-            structured_params["dr_min"] = dr_min
-        if dr_max is not None:
-            structured_conditions.append("(price * 100.0 / NULLIF(retail_price, 0)) <= :dr_max")
-            structured_params["dr_max"] = dr_max
-
-        # 最低销量
-        if intent.get("sales_volume_min") is not None:
-            structured_conditions.append("sales_volume >= :sales_volume_min")
-            structured_params["sales_volume_min"] = intent["sales_volume_min"]
-
-        # 关键词条件（多个关键词之间用 OR，与结构化条件用 AND）
-        keywords = intent.get("keywords", [])
-        for i, kw in enumerate(keywords):
-            pname = f"kw{i}"
-            kw_cond = " OR ".join([
-                f"product_name LIKE :{pname}",
-                f"quick_model LIKE :{pname}",
-                f"product_model LIKE :{pname}",
-                f"specification LIKE :{pname}",
-                f"brand LIKE :{pname}",
-                f"remark LIKE :{pname}",
-            ])
-            keyword_conditions.append(f"({kw_cond})")
-            keyword_params[pname] = f"%{kw}%"
-
-        def _execute(structured, keywords, s_params, k_params, owner_id_val=None) -> tuple:
-            """执行一次查询，返回 (results, count)（支持数据隔离）"""
-            all_conditions = list(structured)
-            # 数据隔离
-            if owner_id_val is not None:
-                all_conditions.append("owner_id = :owner_id")
-                s_params["owner_id"] = owner_id_val
-            # 多个关键词之间用 AND
-            if keywords:
-                all_conditions.extend(keywords)
-            where_clause = " AND ".join(all_conditions) if all_conditions else "1=1"
-            all_params = {**s_params, **k_params}
-            sql = f"SELECT * FROM products WHERE {where_clause} ORDER BY price ASC LIMIT 200"
-            with sync_engine.connect() as conn:
-                rows = conn.execute(text(sql), all_params).fetchall()
-                if not rows:
-                    return [], 0
-                # PRAGMA table_info 返回 (cid,name,type,notnull,dflt_value,pk)，name 是列名
-                columns = [col[1] for col in conn.execute(text("PRAGMA table_info(products)")).fetchall()]
-                results = [dict(zip(columns, row)) for row in rows]
-            return results, len(results)
-
-        # 策略0（优先）：型号列表 → 使用 OR 查询（匹配任一型号即可）
-        model_numbers = intent.get("model_numbers", [])
-        if model_numbers:
-            model_conditions = []
-            model_params = {}
-            for i, mn in enumerate(model_numbers):
-                pname = f"mn{i}"
-                model_conditions.append(f"(quick_model LIKE :{pname} OR product_model LIKE :{pname})")
-                model_params[pname] = f"%{mn}%"
-            # 多个型号用 OR 连接
-            mn_where = " OR ".join(model_conditions)
-            def _execute_models(s_params, owner_id_val=None):
-                all_cond = [f"({mn_where})"]
-                if owner_id_val is not None:
-                    all_cond.append("owner_id = :owner_id")
-                    s_params["owner_id"] = owner_id_val
-                where_clause = " AND ".join(all_cond)
-                all_params = {**s_params, **model_params}
-                sql = f"SELECT * FROM products WHERE {where_clause} ORDER BY price ASC"
-                with sync_engine.connect() as conn:
-                    rows = conn.execute(text(sql), all_params).fetchall()
-                    if not rows:
-                        return [], 0
-                    columns = [col[1] for col in conn.execute(text("PRAGMA table_info(products)")).fetchall()]
-                    results = [dict(zip(columns, row)) for row in rows]
-                return results, len(results)
-            results, total = _execute_models(structured_params, owner_id)
-            return results, total, 0
-
-        # 策略1：结构化条件 + 关键词（精确匹配）
-        results, total = _execute(structured_conditions, keyword_conditions, structured_params, keyword_params, owner_id)
-        if total > 0:
-            return results, total, 1
-
-        # 策略2：仅结构化条件（放宽关键词）
-        if keyword_conditions:
-            results, total = _execute(structured_conditions, [], structured_params, {}, owner_id)
-            if total > 0:
-                return results, total, 2
-
-        # 策略3：仅关键词（放宽结构化条件）
-        if keyword_conditions and structured_conditions:
-            results, total = _execute([], keyword_conditions, {}, keyword_params, owner_id)
-            if total > 0:
-                return results, total, 3
-
-        # 策略4：无条件，返回全部（仅当用户没有输入任何条件时才有意义）
-        results, total = _execute([], [], {}, {}, owner_id)
-        return results, total, 4
-    # ========== 推荐产品查询 ==========
-
-    def _get_recommended_products_by_intent(self, intent: Dict[str, Any], owner_id: int) -> list:
-        """查询上级用户的推荐产品（基于邀请链溯源），按 intent 条件筛选"""
-        recommended = []
-        try:
-            with sync_engine.connect() as conn:
-                # 沿邀请链向上查找所有来源用户
-                source_user_ids = []
-                source_user_info = {}
-                visited = set()
-                next_user_id = owner_id
-
-                while next_user_id and next_user_id not in visited:
-                    visited.add(next_user_id)
-                    invite_row = conn.execute(
-                        text('SELECT created_by FROM invite_codes WHERE used_by = :uid AND is_used = 1 LIMIT 1'),
-                        {'uid': next_user_id}
-                    ).fetchone()
-                    if not invite_row:
-                        break
-                    inviter_id = invite_row[0]
-                    if inviter_id == next_user_id or inviter_id in visited:
-                        break
-                    user_row = conn.execute(
-                        text('SELECT id, role, company_name FROM users WHERE id = :uid AND is_active = 1'),
-                        {'uid': inviter_id}
-                    ).fetchone()
-                    if not user_row:
-                        break
-                    source_user_ids.append(inviter_id)
-                    source_user_info[inviter_id] = {
-                        'role': user_row[1] or '',
-                        'company_name': user_row[2] or '',
-                    }
-                    next_user_id = inviter_id
-
-                if not source_user_ids:
-                    return []
-
-                # 构建查询条件
-                conditions = []
-                params = {}
-
-                if intent.get('brand'):
-                    conditions.append('brand LIKE :brand')
-                    params['brand'] = '%%' + intent['brand'] + '%%'
-                if intent.get('category_level1'):
-                    conditions.append('category_level1 LIKE :cat1')
-                    params['cat1'] = '%%' + intent['category_level1'] + '%%'
-                if intent.get('category_level2'):
-                    conditions.append('category_level2 LIKE :cat2')
-                    params['cat2'] = '%%' + intent['category_level2'] + '%%'
-                if intent.get('category_level3'):
-                    conditions.append('category_level3 LIKE :cat3')
-                    params['cat3'] = '%%' + intent['category_level3'] + '%%'
-                if intent.get('specification'):
-                    conditions.append('specification LIKE :spec')
-                    params['spec'] = '%%' + intent['specification'] + '%%'
-                if intent.get('supply_status'):
-                    conditions.append('supply_status LIKE :status')
-                    params['status'] = '%%' + intent['supply_status'] + '%%'
-
-                # 价格字段范围
-                price_field_map = {
-                    'price': 'price',
-                    'purchase_price': 'purchase_price',
-                    'retail_price': 'retail_price',
-                    'negotiation_price': 'negotiation_price',
-                    'bid_price': 'bid_price',
-                    'group_purchase_price': 'group_purchase_price',
-                    'new_event_price': 'new_event_price',
-                    'shipping_fee': 'shipping_fee',
-                    'gross_weight': 'gross_weight',
-                }
-                for field, col in price_field_map.items():
-                    min_key = field + '_min'
-                    max_key = field + '_max'
-                    if intent.get(min_key) is not None:
-                        conditions.append(col + ' >= :' + min_key)
-                        params[min_key] = intent[min_key]
-                    if intent.get(max_key) is not None:
-                        conditions.append(col + ' <= :' + max_key)
-                        params[max_key] = intent[max_key]
-
-                # 型号列表（优先，用 OR）
-                model_numbers = intent.get('model_numbers', [])
-                if model_numbers:
-                    model_clauses = []
-                    for i, mn in enumerate(model_numbers):
-                        pname = 'rmn' + str(i)
-                        model_clauses.append('(quick_model LIKE :' + pname + ' OR product_model LIKE :' + pname + ')')
-                        params[pname] = '%%' + mn + '%%'
-                    if model_clauses:
-                        conditions.append('(' + ' OR '.join(model_clauses) + ')')
+        # ---- 商品数量 ----
+        # 支持"3个"、"三个"、"三件"、"三种"等，包含上下文避免误匹配
+        cn_num_map = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5}
+        qty_patterns = [
+            # 优先匹配"包含/共/一共/合计 X个产品"这种明确上下文
+            r"(?:共|一共|合计|包含|含)\s*(\d+)\s*(?:个|种|件|样|款)\s*(?:产品|商品|东西|礼品|礼盒)",
+            r"(?:共|一共|合计|包含|含)\s*(\d+)\s*(?:个|种|件|样|款)",
+            # 中文数字：同样需要明确上下文
+            r"(?:共|一共|合计|包含|含)\s*([一二两三四五])\s*(?:个|种|件|样|款)\s*(?:产品|商品)",
+            r"(?:共|一共|合计|包含|含)\s*([一二两三四五])\s*(?:个|种|件|样|款)",
+            # 简单"X个"
+            r"(\d+)\s*(?:个|种|件|样|款)\s*(?:产品|商品|东西|礼品|礼盒)",
+            r"(\d+)\s*(?:个|种|件|样|款)",
+            # 中文数字（如"三个产品"、"三件"），无上下文也可识别
+            r"([一二两三四五])\s*(?:个|种|件|样|款)\s*(?:产品|商品|东西|礼品|礼盒)",
+            r"([一二两三四五])\s*(?:个|种|件|样|款)",
+        ]
+        for pattern in qty_patterns:
+            qty_match = re.search(pattern, text)
+            if qty_match:
+                val = qty_match.group(1)
+                # 支持中文数字映射，否则转整数
+                if val in cn_num_map:
+                    constraints["total_quantity"] = cn_num_map[val]
                 else:
-                    # 关键词条件（用 AND）
-                    keywords = intent.get('keywords', [])
-                    kw_clauses = []
-                    for i, kw in enumerate(keywords):
-                        pname = 'kw' + str(i)
-                        kw_parts = [
-                            'product_name LIKE :' + pname,
-                            'quick_model LIKE :' + pname,
-                            'product_model LIKE :' + pname,
-                            'specification LIKE :' + pname,
-                            'brand LIKE :' + pname,
-                        ]
-                        kw_clauses.append('(' + ' OR '.join(kw_parts) + ')')
-                        params[pname] = '%%' + kw + '%%'
-                    if kw_clauses:
-                        conditions.extend(kw_clauses)
+                    try:
+                        constraints["total_quantity"] = int(val)
+                    except ValueError:
+                        continue  # 忽略无法解析的匹配
+                break
 
-                # 组装 WHERE
-                all_cond = list(conditions)
-                owner_placeholders = []
-                for idx, uid in enumerate(source_user_ids):
-                    pk = 'src_uid_' + str(idx)
-                    owner_placeholders.append(':' + pk)
-                    params[pk] = uid
-                all_cond.append('owner_id IN (' + ', '.join(owner_placeholders) + ')')
+        # 提取最高折扣率（放松中间字词匹配，用 .*? 替代 [约为]?）
+        dr_match = re.search(r"(?:折扣率|折扣).*?(?:低于|小于|不超过|不高于)\s*(\d+\.?\d*)\s*%?", text)
+        if not dr_match:
+            dr_match = re.search(r"(?:折扣率|折扣)[约为]?\s*(\d+\.?\d*)\s*%?", text)
+        if dr_match:
+            constraints["max_discount_rate"] = float(dr_match.group(1))
 
-                where_clause = ' AND '.join(all_cond) if all_cond else '1=1'
-                # 按权限级别排序：高级别用户的产品在前，同级别按价格升序
-                order_cases = ' '.join(
-                    f"WHEN owner_id = {uid} THEN {i}"
-                    for i, uid in enumerate(reversed(source_user_ids))
+        # ---- 提取品类列表 ----
+        qty = constraints.get("total_quantity", 3)
+        cats: List[str] = []
+
+        # 优先用"产品分别是/分别是"（更精确），其次才是"包含/包括"
+        cat_section = re.search(r"(?:产品分别是|分别是)\s*(.+)", text)
+        if not cat_section:
+            # 排除"其中包含"这种非品类列举的"包含"
+            cat_section = re.search(r"(?:包括|包含)\s*(.+)", text)
+
+        if cat_section:
+            cat_text = cat_section.group(1)
+            # 移除末尾的条件描述（"其中..."、"，"、"。"等），保留品类名
+            cat_text = re.sub(r"[，。].*$", "", cat_text)  # 句号/逗号开头意味着条件开始
+            cat_text = re.sub(r"其中.*$", "", cat_text)    # "其中..."也是条件描述
+            cats = re.split(r"[、，,]", cat_text)
+            cats = [c.strip() for c in cats if c.strip()]
+
+        # 如果找到了品类，为每个品类创建槽位
+        if cats:
+            for i, cat in enumerate(cats):
+                slot: Dict[str, Any] = {"category": cat}
+                # 为该品类查找紧密关联的价格约束
+                # 只匹配"品类名(价值)不低于/不超过XXX"这种紧邻的约束，不会误读到其他品类的条件
+                price_min_m = re.search(
+                    rf"{re.escape(cat)}\s*(?:价值)?\s*(?:不低于|至少|不少于|≥)\s*(\d+)",
+                    text
                 )
-                order_by = f"CASE {order_cases} ELSE 999 END, price ASC"
-                sql = 'SELECT id, owner_id, quick_model, product_model, product_name, brand, category_level1, category_level2, specification, price, supply_status, image FROM products WHERE ' + where_clause + ' ORDER BY ' + order_by + ' LIMIT 200'
+                price_max_m = re.search(
+                    rf"{re.escape(cat)}\s*(?:价值)?\s*(?:不超过|不高于|≤)\s*(\d+)",
+                    text
+                )
+                if price_min_m:
+                    slot["price_min"] = float(price_min_m.group(1))
+                if price_max_m:
+                    slot["price_max"] = float(price_max_m.group(1))
+                constraints["items"].append(slot)
+            # 如果品类数少于总数量，补齐空位
+            while len(constraints["items"]) < qty:
+                constraints["items"].append({})
+        else:
+            # 没找到明确品类
+            is_simple_search = constraints.get("total_quantity", 1) <= 1
+            if is_simple_search:
+                # 未指定数量或只要求1个 → 简单商品搜索，按 1 个商品处理
+                constraints["total_quantity"] = 1
+                constraints["items"] = [{}]
+                # 简单搜索：把未被识别为价格/数量条件的剩余文本作为搜索关键词
+                remaining = text
+                for phrase in matched_phrases:
+                    remaining = remaining.replace(phrase, "")
+                for key in ["brand", "category_level1", "category_level2", "category_level3",
+                            "specification", "supply_status"]:
+                    val = constraints.get(key)
+                    if isinstance(val, str) and val:
+                        remaining = remaining.replace(val, "")
+                remaining = re.sub(r"[，。、！？：；\"\"''（）【】《》\s\d.%]+", " ", remaining)
+                remaining = re.sub(r"[的是了在要给我一个件个种款大概大约左右以内以下不超过不高于]+", " ", remaining)
+                keywords = []
+                for kw in remaining.split():
+                    kw = kw.strip()
+                    if kw and len(kw) >= 2:
+                        keywords.append(kw)
+                if keywords:
+                    constraints["keywords"] = keywords
+            else:
+                # 用户明确指定了多个数量，创建对应空位
+                for _ in range(qty):
+                    constraints["items"].append({})
 
-                rows = conn.execute(text(sql), params).fetchall()
-                for row in rows:
-                    owner_info = source_user_info.get(row[1], {})
-                    recommended.append({
-                        'id': row[0],
-                        'owner_id': row[1],
-                        'quick_model': row[2] or '',
-                        'product_model': row[3] or '',
-                        'product_name': row[4] or '',
-                        'brand': row[5] or '',
-                        'category_level1': row[6] or '',
-                        'category_level2': row[7] or '',
-                        'specification': row[8] or '',
-                        'price': float(row[9]) if row[9] else 0,
-                        'supply_status': row[10] or '',
-                        'image': row[11] or '',
-                        'source_company_name': owner_info.get('company_name', ''),
-                        'source_role': owner_info.get('role', ''),
-                    })
-        except Exception as e:
-            logger.warning('获取推荐产品失败: ' + str(e))
-        return recommended
+        # "X以内/以下/不超过" → 严格总价上限（不应用 ±容差）
+        if total_price_cap is not None:
+            constraints["price_max"] = total_price_cap
+            # 简单搜索（单个商品）时，同时应用到该槽位价格上限
+            if len(constraints["items"]) == 1 and constraints["items"][0].get("price_max") is None:
+                constraints["items"][0]["price_max"] = total_price_cap
+
+        constraints["summary"] = text[:100]
+        return constraints
+
+    # ========== 结构化输入（多块输入） ==========
+
+    def _build_structured_constraints(self, total_price: Optional[float], slots: list,
+                                      max_discount_rate: Optional[float] = None,
+                                      total_price_op: str = "",
+                                      total_discount_op: str = "") -> Dict[str, Any]:
+        """从结构化输入（总价 + 总折扣率 + 商品信息块列表）构建组合约束
+
+        每个商品信息块：{category: 三级品类, quantity: 数量, price_op/price: 价格限制,
+        discount_op/discount: 折扣率限制}
+        总价/总折扣率支持 大于(gt)/小于(lt)/左右(around) 操作符
+        数量 N 会展开为 N 个槽位（每个槽位匹配该品类），从而组合出不同商品
+        """
+        items: List[Dict[str, Any]] = []
+        slot_descs = []
+        for slot in slots:
+            qty = max(1, int(getattr(slot, "quantity", 1) or 1))
+            cat = (getattr(slot, "category", "") or "").strip()
+            price_min = getattr(slot, "price_min", None)
+            price_max = getattr(slot, "price_max", None)
+            price_op = (getattr(slot, "price_op", "") or "").strip()
+            price_val = getattr(slot, "price", None)
+            discount_op = (getattr(slot, "discount_op", "") or "").strip()
+            discount_val = getattr(slot, "discount", None)
+            discount_min = None
+            discount_max = None
+
+            # 根据操作符将价格限制转换为价格范围
+            if price_op and price_val is not None:
+                price_val = float(price_val)
+                if price_op == "gt":          # 大于
+                    price_min = price_val
+                    price_max = None
+                elif price_op == "lt":        # 小于
+                    price_max = price_val
+                    price_min = None
+                elif price_op == "around":    # 左右（±15%）
+                    price_min = round(price_val * 0.85, 2)
+                    price_max = round(price_val * 1.15, 2)
+
+            # 折扣率限制 → 折扣率范围（折扣率 = price/retail_price*100）
+            if discount_op and discount_val is not None:
+                discount_val = float(discount_val)
+                if discount_op == "gt":          # 大于
+                    discount_min = discount_val
+                elif discount_op == "lt":        # 小于
+                    discount_max = discount_val
+                elif discount_op == "around":    # 左右（±15%）
+                    discount_min = round(discount_val * 0.85, 2)
+                    discount_max = round(discount_val * 1.15, 2)
+
+            for _ in range(qty):
+                item: Dict[str, Any] = {}
+                if cat:
+                    # 三级品类（精确匹配，前端从三级品类列表选择）
+                    item["category_level3"] = cat
+                if price_min is not None:
+                    item["price_min"] = price_min
+                if price_max is not None:
+                    item["price_max"] = price_max
+                if discount_min is not None:
+                    item["discount_min"] = discount_min
+                if discount_max is not None:
+                    item["discount_max"] = discount_max
+                items.append(item)
+
+            # 生成摘要
+            price_txt = ""
+            if price_val is not None and price_op:
+                if price_op == "gt":
+                    price_txt = f"（＞{price_val}元）"
+                elif price_op == "lt":
+                    price_txt = f"（＜{price_val}元）"
+                elif price_op == "around":
+                    price_txt = f"（{price_val}元左右）"
+            discount_txt = ""
+            if discount_val is not None and discount_op:
+                if discount_op == "gt":
+                    discount_txt = f"（折扣率＞{discount_val}%）"
+                elif discount_op == "lt":
+                    discount_txt = f"（折扣率＜{discount_val}%）"
+                elif discount_op == "around":
+                    discount_txt = f"（折扣率{discount_val}%左右）"
+            slot_name = cat or "任意商品"
+            slot_descs.append(f"{slot_name}×{qty}{price_txt}{discount_txt}")
+
+        constraints: Dict[str, Any] = {
+            "total_price": float(total_price) if total_price else 0,
+            "items": items,
+        }
+        # 总价操作符 → 总价上下界（兼容旧客户端：无操作符时默认"小于"=预算上限）
+        if total_price:
+            tv = float(total_price)
+            op = total_price_op or "lt"
+            if op == "lt":          # 小于 → 预算上限
+                constraints["price_min"] = 0.0
+                constraints["price_max"] = tv
+            elif op == "gt":        # 大于 → 总价下限
+                constraints["price_min"] = tv
+            elif op == "around":    # 左右（±15%）
+                constraints["price_min"] = round(tv * 0.85, 2)
+                constraints["price_max"] = round(tv * 1.15, 2)
+        # 总折扣率操作符 → 整体折扣率范围（兼容旧客户端：默认"小于"=上限）
+        if max_discount_rate is not None:
+            dv = float(max_discount_rate)
+            op = total_discount_op or "lt"
+            # 记录折扣率目标值（供排序时让方案总折扣率尽量靠近用户输入）
+            constraints["discount_target"] = dv
+            if op == "lt":          # 小于
+                constraints["max_discount_rate"] = dv
+            elif op == "gt":        # 大于
+                constraints["min_discount_rate"] = dv
+            elif op == "around":    # 左右（±15%）
+                constraints["min_discount_rate"] = round(dv * 0.85, 2)
+                constraints["max_discount_rate"] = round(dv * 1.15, 2)
+
+        summary_parts = []
+        if total_price:
+            tv = float(total_price)
+            op = total_price_op or "lt"
+            if op == "lt":
+                summary_parts.append(f"总价≤{tv}元")
+            elif op == "gt":
+                summary_parts.append(f"总价≥{tv}元")
+            elif op == "around":
+                summary_parts.append(f"总价{tv}元左右")
+        if max_discount_rate is not None:
+            dv = float(max_discount_rate)
+            op = total_discount_op or "lt"
+            if op == "lt":
+                summary_parts.append(f"总折扣率≤{dv}%")
+            elif op == "gt":
+                summary_parts.append(f"总折扣率≥{dv}%")
+            elif op == "around":
+                summary_parts.append(f"总折扣率{dv}%左右")
+        summary_parts.extend(slot_descs)
+        constraints["summary"] = "，".join(summary_parts)
+        return constraints
 
     # ========== 对外接口 ==========
 
+    # ---- AI 模式"一键应用"辅助：把诊断改写为可直接覆盖用户输入的需求文本 ----
 
-    async def analyze(self, requirement: str, use_ai: bool = False, filters: dict = None, owner_id: Optional[int] = None) -> Dict[str, Any]:
-        """分析需求并返回候选商品（数据隔离）"""
-        intent = {}
+    def _build_requirement_text(self, constraints: Dict[str, Any]) -> str:
+        """从结构化约束生成一段自然语言需求文本（供 AI 模式一键应用覆盖输入用）"""
+        parts: List[str] = []
 
-        if use_ai:
-            # 获取数据库参考数据，帮助 AI 理解实际存在的值
-            reference_data = self._get_reference_data()
-            ai_result = await self._parse_by_ai(requirement, reference_data)
+        if constraints.get("price_min") is not None and constraints.get("price_max") is not None \
+                and constraints["price_min"] == constraints["price_max"]:
+            parts.append(f"总价{constraints['price_min']}元左右")
+        elif constraints.get("price_max") is not None and constraints["price_max"] != float('inf'):
+            parts.append(f"总价不超过{constraints['price_max']}元")
+        elif constraints.get("price_min") is not None:
+            parts.append(f"总价不低于{constraints['price_min']}元")
+
+        if constraints.get("min_discount_rate") is not None:
+            parts.append(f"总折扣率不低于{constraints['min_discount_rate']}%")
+        if constraints.get("max_discount_rate") is not None and constraints["max_discount_rate"] < 100:
+            parts.append(f"总折扣率不超过{constraints['max_discount_rate']}%")
+
+        for i, item in enumerate(constraints.get("items") or [], 1):
+            cat = item.get("category_level3") or item.get("category") or "任意商品"
+            desc = f"{i}.{cat}"
+            if item.get("price_min") is not None:
+                desc += f"（价格不低于{item['price_min']}元）"
+            if item.get("price_max") is not None:
+                desc += f"（价格不超过{item['price_max']}元）"
+            if item.get("discount_min") is not None:
+                desc += f"（折扣率不低于{item['discount_min']}%）"
+            if item.get("discount_max") is not None:
+                desc += f"（折扣率不超过{item['discount_max']}%）"
+            parts.append(desc)
+
+        if not parts:
+            return ""
+        return "，".join(parts) + "，请生成组合方案"
+
+    def _apply_adjust_to_constraints(self, constraints: Dict[str, Any], adj: Dict[str, Any]) -> Dict[str, Any]:
+        """把诊断调整应用到约束副本，返回修改后的新约束（不改动原始约束）"""
+        import copy
+        c = copy.deepcopy(constraints)
+        field = adj.get("field")
+        value = adj.get("value")
+        op = adj.get("op")
+        idx = adj.get("slot_index")
+        items = c.setdefault("items", [])
+
+        if field == "total_discount":
+            if op == "lt":
+                c["max_discount_rate"] = value
+                c.pop("min_discount_rate", None)
+            elif op == "gt":
+                c["min_discount_rate"] = value
+                c.pop("max_discount_rate", None)
+        elif field == "total_price":
+            if op == "lt":
+                c["price_max"] = value
+                c.pop("price_min", None)
+            elif op == "gt":
+                c["price_min"] = value
+                c.pop("price_max", None)
+        elif field == "price" and idx is not None and 0 <= idx < len(items):
+            if op == "lt":
+                items[idx]["price_max"] = value
+                items[idx].pop("price_min", None)
+            elif op == "gt":
+                items[idx]["price_min"] = value
+                items[idx].pop("price_max", None)
+        elif field == "discount" and idx is not None and 0 <= idx < len(items):
+            if op == "lt":
+                items[idx]["discount_max"] = value
+                items[idx].pop("discount_min", None)
+            elif op == "gt":
+                items[idx]["discount_min"] = value
+                items[idx].pop("discount_max", None)
+        elif field == "remove_last_slot" and len(items) > 1:
+            items.pop()
+        return c
+
+    def _attach_requirement_adjust(self, result: Dict[str, Any], constraints: Dict[str, Any]) -> None:
+        """AI 模式：把每条诊断的一键应用改为"直接覆盖用户输入的需求文本"。
+
+        非 AI 模式是结构化输入（总价/折扣率/商品块输入框），沿用原 adjust（改对应输入框）；
+        AI 模式输入是自然语言文本、没有这些输入框，因此把 adjust 改写为
+        {"field": "requirement", "value": "修改后的完整需求文本"}，前端一键应用时直接覆盖文本输入。
+        对无具体数值的诊断（如"空槽位-换品类"）不附加，避免覆盖成无意义的文本。
+        """
+        original_text = self._build_requirement_text(constraints)
+        for d in result.get("diagnosis") or []:
+            adj = d.get("adjust")
+            if not adj:
+                continue
+            revised = self._build_requirement_text(self._apply_adjust_to_constraints(constraints, adj))
+            if revised and revised != original_text:
+                d["adjust"] = {"field": "requirement", "value": revised}
+
+    async def analyze(self, requirement: str = "", use_ai: bool = False,
+                      company_id: Optional[int] = None, user_id: Optional[int] = None,
+                      max_solutions: int = 50, total_price: Optional[float] = None,
+                      slots: Optional[list] = None, max_discount_rate: Optional[float] = None,
+                      total_price_op: str = "", total_discount_op: str = "") -> Dict[str, Any]:
+        """分析组合需求，调用组合引擎生成所有可行方案（v2.0）
+
+        支持两种输入：
+        - 结构化输入：total_price + max_discount_rate + slots（多块输入，前端主用）
+        - 文本输入：requirement（自然语言/AI）
+        """
+        constraints = {}
+        tokens_used = 0
+        ai_summary = ""
+
+        if slots:
+            # 结构化输入（多块输入）
+            constraints = self._build_structured_constraints(
+                total_price, slots, max_discount_rate=max_discount_rate,
+                total_price_op=total_price_op, total_discount_op=total_discount_op,
+            )
+        elif use_ai:
+            reference_data = self._get_reference_data(company_id=company_id or 0)
+            ai_result, tokens_used = await self._parse_by_ai(requirement, reference_data, company_id=company_id or 0, user_id=user_id or 0)
             if ai_result:
-                intent = ai_result
-                ai_summary = ai_result.get("summary", "")
+                # AI 结果转结构化约束（复用多块输入逻辑，与前端结构完全一致）
+                from types import SimpleNamespace
+                ai_items = [SimpleNamespace(**it) for it in (ai_result.get("items") or [])]
+                constraints = self._build_structured_constraints(
+                    ai_result.get("total_price"), ai_items,
+                    max_discount_rate=ai_result.get("max_discount_rate"),
+                    total_price_op=ai_result.get("total_price_op") or "lt",
+                    total_discount_op=ai_result.get("max_discount_op") or "",
+                )
+                if not constraints.get("items"):
+                    # AI 未解析出商品信息（如简单商品搜索）→ 退回规则引擎
+                    constraints = self._parse_combination_by_rules(requirement)
+                    ai_summary = ""
+                else:
+                    ai_summary = ai_result.get("summary", "") or constraints.get("summary", "")
             else:
-                # AI 失败，回退到规则引擎
-                intent = self._parse_by_rules(requirement)
+                constraints = self._parse_combination_by_rules(requirement)
                 ai_summary = ""
         else:
-            intent = self._parse_by_rules(requirement)
+            constraints = self._parse_combination_by_rules(requirement)
             ai_summary = ""
 
-        # 合并前端筛选器传入的条件（覆盖自动解析的）
-        if filters:
-            for key in ["brand", "category_level1", "category_level2", "category_level3",
-                         "price_min", "price_max", "negotiation_price_min", "negotiation_price_max",
-                         "purchase_price_min", "purchase_price_max",
-                         "retail_price_min", "retail_price_max",
-                         "discount_rate_min", "discount_rate_max",
-                         "supply_status", "specification"]:
-                if key in filters and filters[key] is not None and filters[key] != "":
-                    intent[key] = filters[key]
+        # 调用组合方案生成引擎
+        from app.services.combination_engine import combination_engine
+        result = combination_engine.generate(constraints, company_id=company_id, max_solutions=max_solutions)
 
-        # 查询候选商品（带数据隔离）
-        candidates_raw, total, strategy = self._query_candidates(intent, owner_id=owner_id)
+        # AI 模式：输入是自然语言文本，把每条诊断的"一键应用"改写为"直接覆盖用户输入的需求文本"
+        if use_ai:
+            self._attach_requirement_adjust(result, constraints)
 
-        # 判断是否需要给出提示：策略4（全量返回）且用户有输入条件，说明无匹配
-        has_user_intent = bool(intent.get("brand") or intent.get("category_level1") or
-                               intent.get("category_level2") or intent.get("category_level3") or
-                               intent.get("keywords") or intent.get("price_min") is not None or
-                               intent.get("price_max") is not None)
+        # 附加解析摘要
+        result["parsed_constraints"] = constraints
+        result["ai_interpretation"] = ai_summary if use_ai else ""
+        result["tokens_used"] = tokens_used
 
-        # 格式化为前端需要的结构
-        candidates = []
-        for p in candidates_raw:
-            candidates.append({
-                "id": p.get("id"),
-                "quick_model": p.get("quick_model", ""),
-                "product_model": p.get("product_model", ""),
-                "product_name": p.get("product_name", ""),
-                "brand": p.get("brand", ""),
-                "category_level1": p.get("category_level1", ""),
-                "category_level2": p.get("category_level2", ""),
-                "specification": p.get("specification", ""),
-                "price": p.get("price", 0),
-                "supply_status": p.get("supply_status", ""),
-                "image": p.get("image", "") or "",
-            })
-        # 查询推荐产品（低权限账号可看到上级账号的商品）
-        recommended_count = 0
-        if owner_id is not None:
-            recommended_raw = self._get_recommended_products_by_intent(intent, owner_id)
-            if recommended_raw:
-                existing_ids = {c["id"] for c in candidates}
-                for p in recommended_raw:
-                    if p["id"] not in existing_ids:
-                        candidates.append({
-                            "id": p.get("id"),
-                            "quick_model": p.get("quick_model", ""),
-                            "product_model": p.get("product_model", ""),
-                            "product_name": p.get("product_name", ""),
-                            "brand": p.get("brand", ""),
-                            "category_level1": p.get("category_level1", ""),
-                            "category_level2": p.get("category_level2", ""),
-                            "specification": p.get("specification", ""),
-                            "price": p.get("price", 0),
-                            "supply_status": p.get("supply_status", ""),
-                            "image": p.get("image", "") or "",
-                            "is_recommended": True,
-                            "source_company_name": p.get("source_company_name", ""),
-                            "source_role": p.get("source_role", ""),
-                        })
-                        recommended_count += 1
+        return result
 
+    def generate_recommended_solutions(
+        self,
+        requirement: str,
+        company_id: int,
+        role: str,
+        user_id: int = 0,
+        max_solutions: int = 50,
+    ) -> Dict[str, Any]:
+        """为低权限用户生成高权限公司的推荐方案（基于邀请链）
 
-        if total > 0 and strategy < 4:
-            part1 = f"共找到 {total} 个符合条件的商品"
-            message = part1 + (f"，此外还有 {recommended_count} 个推荐产品" if recommended_count > 0 else "")
-        elif total > 0 and strategy == 4 and has_user_intent:
-            # 策略4回退：用户有输入但无精确匹配
-            if recommended_count > 0:
-                # 保留推荐产品，只清除不相关的自有商品
-                candidates = [c for c in candidates if c.get("is_recommended")]
-                total = 0
-                message = f"未找到与需求匹配的个人商品，但有 {recommended_count} 个推荐产品供参考"
-            else:
-                candidates = []
-                total = 0
-                message = (
-                    "未找到与需求匹配的商品。"
-                    "建议尝试：\n"
-                    "1. 使用更简单的关键词：只需输入品牌 + 品类，如「飞利浦 充电宝」\n"
-                    "2. 或输入快查型号/69码进行精确查找\n"
-                    "3. 或使用普通模式（关闭AI），用筛选条件组合查询"
+        沿着邀请链向上查找：
+        - 同公司不推荐
+        - 只有角色更高才推荐
+        """
+        # 1. 解析需求（规则引擎，不同步调用 AI）
+        constraints = self._parse_combination_by_rules(requirement)
+        if not constraints.get("items"):
+            return {"solutions": [], "total_solutions": 0, "message": "未解析出商品组合条件"}
+
+        # 最高级管理员无推荐
+        if role == "super_admin":
+            return {"solutions": [], "total_solutions": 0, "message": "最高级管理员无推荐方案"}
+
+        if not company_id:
+            return {"solutions": [], "total_solutions": 0, "message": "请先完善公司信息"}
+
+        # 2. 沿着邀请链向上查找来源公司
+        source_companies = []  # [(company_id, company_name)]
+        visited_user_ids = {user_id} if user_id else set()
+        current_user_id = user_id
+
+        while current_user_id:
+            with sync_engine.connect() as conn:
+                # 查找当前用户使用的邀请码
+                invite_row = conn.execute(
+                    text("SELECT created_by FROM invite_codes WHERE used_by = :uid AND is_used = 1"),
+                    {'uid': current_user_id}
+                ).fetchone()
+                if not invite_row:
+                    break
+
+                creator_id = invite_row[0]
+                if creator_id in visited_user_ids:
+                    break
+                visited_user_ids.add(creator_id)
+
+                # 查询创建者信息
+                creator_row = conn.execute(
+                    text("SELECT role, company_id, company_name FROM users WHERE id = :uid AND is_active = 1"),
+                    {'uid': creator_id}
+                ).fetchone()
+                if not creator_row:
+                    break
+
+                creator_role = creator_row[0]
+                creator_company_id = creator_row[1] or 0
+                creator_company_name = creator_row[2] or ""
+
+                # 同公司不推荐
+                if creator_company_id == company_id or not creator_company_id:
+                    current_user_id = creator_id
+                    continue
+
+                # 只有角色更高才推荐
+                role_hierarchy = {"super_admin": 3, "admin": 2, "user": 1}
+                current_level = role_hierarchy.get(role, 0)
+                creator_level = role_hierarchy.get(creator_role, 0)
+                if creator_level > current_level and creator_company_id not in [c[0] for c in source_companies]:
+                    source_companies.append((creator_company_id, creator_company_name))
+
+                # 继续向上
+                current_user_id = creator_id
+
+        if not source_companies:
+            return {"solutions": [], "total_solutions": 0, "message": "暂无推荐方案"}
+
+        # 3. 为每个来源公司生成方案
+        from app.services.combination_engine import combination_engine
+        all_solutions = []
+        seen_signatures = set()
+
+        for src_company_id, src_company_name in source_companies:
+            result = combination_engine.generate(
+                constraints,
+                company_id=src_company_id,
+                max_solutions=max_solutions,
+            )
+            for sol in result.get("solutions", []):
+                # 查询该公司的用户角色（取第一个作为来源角色）
+                with sync_engine.connect() as conn:
+                    role_row = conn.execute(
+                        text("SELECT role FROM users WHERE company_id = :c AND is_active = 1 LIMIT 1"),
+                        {'c': src_company_id}
+                    ).fetchone()
+                src_role = role_row[0] if role_row else ""
+
+                sol["source_company_name"] = src_company_name
+                sol["source_role"] = src_role
+
+                # 基于产品 quick_model 集合去重
+                sig = tuple(
+                    sorted(item.get("quick_model", "") for item in sol.get("items", []))
                 )
-        elif total > 0 and strategy == 4:
-            message = f"共找到 {total} 个商品" + (f"，此外还有 {recommended_count} 个推荐产品" if recommended_count > 0 else "")
-        else:
-            if recommended_count > 0:
-                message = f"未找到匹配的个人商品，但有 {recommended_count} 个推荐产品供参考"
-            else:
-                message = (
-                    "未找到匹配的商品。"
-                    "建议尝试：\n"
-                    "1. 简化输入：只需品牌 + 品类，如「飞利浦 排插」「华为 充电器」\n"
-                    "2. 或使用筛选条件组合查询\n"
-                    "3. 或输入快查型号/69码精确查找"
-                )
+                if sig and sig not in seen_signatures:
+                    seen_signatures.add(sig)
+                    all_solutions.append(sol)
+
+        # 按总价升序
+        all_solutions.sort(key=lambda s: s.get("total_price", 0))
 
         return {
-            "parsed_intent": intent,
-            "ai_interpretation": ai_summary,
-            "candidates": candidates,
-            "total_candidates": total + recommended_count,
-            "message": message,
+            "solutions": all_solutions,
+            "total_solutions": len(all_solutions),
+            "message": f"找到 {len(all_solutions)} 个推荐方案（来自 {len(source_companies)} 家公司）" if all_solutions else "暂无推荐方案",
         }
 
-    def save_plan(self, name: str, requirement: str, ai_enabled: bool, items: list, remark: str = "", owner_id: int = 0) -> Dict[str, Any]:
-        """保存方案到数据库（绑定 owner_id）"""
+    def save_plan(self, name: str, requirement: str, ai_enabled: bool, items: list, remark: str = "", company_id: int = 0, company_name: str = "", owner_id: int = 0) -> Dict[str, Any]:
+        """保存方案到数据库（绑定 company_id 用于隔离，company_name 用于展示）"""
         total_amount = 0.0
         now_str = datetime.now(timezone(timedelta(hours=8))).isoformat()
 
         with sync_engine.connect() as conn:
-            # 插入方案主表（带 owner_id）
+            # 插入方案主表（带 company_id / company_name 和 owner_id）
             result = conn.execute(
-                text("""INSERT INTO solution_plans (name, requirement, ai_enabled, total_amount, status, remark, owner_id, created_at, updated_at)
-                        VALUES (:name, :requirement, :ai_enabled, 0, 'draft', :remark, :owner_id, :now, :now)"""),
-                {"name": name, "requirement": requirement, "ai_enabled": 1 if ai_enabled else 0, "remark": remark, "owner_id": owner_id, "now": now_str}
+                text("""INSERT INTO solution_plans (name, requirement, ai_enabled, total_amount, status, remark, company_name, company_id, owner_id, created_at, updated_at)
+                        VALUES (:name, :requirement, :ai_enabled, 0, 'draft', :remark, :company_name, :company_id, :owner_id, :now, :now)"""),
+                {"name": name, "requirement": requirement, "ai_enabled": 1 if ai_enabled else 0, "remark": remark, "company_name": company_name, "company_id": company_id, "owner_id": owner_id, "now": now_str}
             )
             plan_id = result.lastrowid
 
@@ -718,23 +759,26 @@ class SolutionService:
                 if quantity < 1:
                     quantity = 1
 
-                # 从数据库查询商品信息
+                # 从数据库查询商品信息（需校验数据隔离：只允许使用本公司产品）
                 row = conn.execute(
-                    text("SELECT quick_model, product_model, product_name, brand, specification, price FROM products WHERE id=:id"),
-                    {"id": product_id}
+                    text("SELECT quick_model, product_model, product_name, brand, specification, price, retail_price, category_level1, category_level2, image FROM products WHERE id=:id AND company_id=:company_id"),
+                    {"id": product_id, "company_id": company_id}
                 ).fetchone()
 
                 if not row:
                     continue
 
                 price = float(row[5]) if row[5] else 0
+                retail_price = float(row[6]) if row[6] else 0
+                cat1 = row[7] or ""
+                cat2 = row[8] or ""
                 subtotal = round(price * quantity, 2)
                 total_amount += subtotal
 
                 conn.execute(
                     text("""INSERT INTO solution_items
-                            (plan_id, product_id, quick_model, product_model, product_name, brand, specification, price, quantity, subtotal, created_at)
-                            VALUES (:plan_id, :product_id, :qm, :pm, :pn, :brand, :spec, :price, :qty, :subtotal, :now)"""),
+                            (plan_id, product_id, quick_model, product_model, product_name, brand, category_level1, category_level2, specification, price, retail_price, image, quantity, subtotal, created_at)
+                            VALUES (:plan_id, :product_id, :qm, :pm, :pn, :brand, :cat1, :cat2, :spec, :price, :retail_price, :image, :qty, :subtotal, :now)"""),
                     {
                         "plan_id": plan_id,
                         "product_id": product_id,
@@ -742,8 +786,12 @@ class SolutionService:
                         "pm": row[1] or "",
                         "pn": row[2] or "",
                         "brand": row[3] or "",
+                        "cat1": cat1,
+                        "cat2": cat2,
                         "spec": row[4] or "",
                         "price": price,
+                        "retail_price": retail_price,
+                        "image": row[9] or "",
                         "qty": quantity,
                         "subtotal": subtotal,
                         "now": now_str,
@@ -764,12 +812,14 @@ class SolutionService:
             "items_count": len(items),
         }
 
-    def list_plans(self, owner_id: int = 0) -> list:
-        """获取当前用户的历史方案列表"""
+    def list_plans(self, company_id: int = 0) -> list:
+        """获取当前公司的历史方案列表（含商品数量）"""
         with sync_engine.connect() as conn:
             rows = conn.execute(
-                text("SELECT id, name, requirement, total_amount, status, created_at FROM solution_plans WHERE owner_id=:owner_id ORDER BY created_at DESC"),
-                {"owner_id": owner_id}
+                text("""SELECT p.id, p.name, p.requirement, p.total_amount, p.status, p.created_at,
+                               (SELECT COUNT(*) FROM solution_items WHERE plan_id = p.id) as items_count
+                        FROM solution_plans p WHERE p.company_id=:company_id ORDER BY p.created_at DESC"""),
+                {"company_id": company_id}
             ).fetchall()
             return [
                 {
@@ -779,16 +829,20 @@ class SolutionService:
                     "total_amount": r[3] or 0,
                     "status": r[4] or "draft",
                     "created_at": (str(r[5])[:19].replace('T', ' ')) if r[5] else "",
+                    "items_count": r[6] or 0,
                 }
                 for r in rows
             ]
 
-    def get_plan_detail(self, plan_id: int) -> dict:
-        """获取方案详情（含明细）"""
+    def get_plan_detail(self, plan_id: int, company_id: int = 0) -> dict:
+        """获取方案详情（含明细，数据隔离：按公司ID）"""
         with sync_engine.connect() as conn:
-            plan = conn.execute(
-                text("SELECT * FROM solution_plans WHERE id=:id"), {"id": plan_id}
-            ).fetchone()
+            query = "SELECT * FROM solution_plans WHERE id=:id"
+            params: Dict[str, Any] = {"id": plan_id}
+            if company_id:
+                query += " AND company_id=:company_id"
+                params["company_id"] = company_id
+            plan = conn.execute(text(query), params).fetchone()
             if not plan:
                 raise ValueError("方案不存在")
             plan_cols = [col[1] for col in conn.execute(text("PRAGMA table_info(solution_plans)")).fetchall()]
@@ -803,116 +857,154 @@ class SolutionService:
         plan_dict["items"] = items_list
         return plan_dict
 
-    def delete_plan(self, plan_id: int) -> bool:
-        """删除方案及其明细"""
+    def delete_plan(self, plan_id: int, company_id: int = 0) -> bool:
+        """删除方案及其明细（校验 company_id）"""
         with sync_engine.connect() as conn:
+            # 先校验数据归属
+            query = "SELECT id FROM solution_plans WHERE id=:id"
+            params: Dict[str, Any] = {"id": plan_id}
+            if company_id:
+                query += " AND company_id=:company_id"
+                params["company_id"] = company_id
+            plan = conn.execute(text(query), params).fetchone()
+            if not plan:
+                raise ValueError("方案不存在")
             conn.execute(text("DELETE FROM solution_items WHERE plan_id=:pid"), {"pid": plan_id})
             conn.execute(text("DELETE FROM solution_plans WHERE id=:id"), {"id": plan_id})
             conn.commit()
         return True
 
-    def export_docx(self, plan_id: int) -> bytes:
-        """导出方案为 DOCX 文档"""
-        from docx import Document
-        from docx.shared import Pt, Inches, Cm
-        from docx.enum.table import WD_TABLE_ALIGNMENT
-        from docx.oxml.ns import qn
+    def export_excel(self, plan_id: int, company_id: int = 0) -> Tuple[bytes, str]:
+        """导出方案为 Excel 表格（v2.0）
+        
+        返回: (excel_bytes, filename)
+        - 表格包含产品库中所有字段的列
+        - 最后一列为「备注」列
+        - 文件名为方案名称.xlsx
+        """
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        from openpyxl.utils import get_column_letter
 
-        doc = Document()
-
-        # 设置默认字体
-        style = doc.styles['Normal']
-        font = style.font
-        font.name = '宋体'
-        font.size = Pt(10.5)
-        style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
-
-        # 查询方案信息
         with sync_engine.connect() as conn:
-            plan = conn.execute(
-                text("SELECT * FROM solution_plans WHERE id=:id"),
-                {"id": plan_id}
+            # 查询方案信息
+            plan_row = conn.execute(
+                text("SELECT id, name FROM solution_plans WHERE id=:id AND company_id=:company_id"),
+                {"id": plan_id, "company_id": company_id}
             ).fetchone()
-            if not plan:
+            if not plan_row:
                 raise ValueError("方案不存在")
+            plan_name = plan_row[1] or f"方案_{plan_id}"
 
-            plan_cols = [col[1] for col in conn.execute(text("PRAGMA table_info(solution_plans)")).fetchall()]
-            plan_dict = dict(zip(plan_cols, plan))
-
+            # 查询方案明细
             items = conn.execute(
-                text("SELECT * FROM solution_items WHERE plan_id=:pid ORDER BY id"),
+                text("SELECT product_id, quantity, remark FROM solution_items WHERE plan_id=:pid ORDER BY id"),
                 {"pid": plan_id}
             ).fetchall()
-            item_cols = [col[1] for col in conn.execute(text("PRAGMA table_info(solution_items)")).fetchall()]
-            items_list = [dict(zip(item_cols, row)) for row in items]
 
-        # ---- 构建文档 ----
-        # 标题
-        title = doc.add_heading('产品推荐方案', level=0)
-        title.alignment = 1  # 居中
+            if not items:
+                raise ValueError("方案中没有商品")
 
-        # 方案名称
-        plan_name = plan_dict.get("name") or f"方案_{plan_id}"
-        doc.add_heading(plan_name, level=1)
+            # 查询产品的完整数据（校验数据隔离）
+            product_ids = [item[0] for item in items]
+            placeholders = ", ".join([f":pid{i}" for i in range(len(product_ids))])
+            params = {f"pid{i}": pid for i, pid in enumerate(product_ids)}
+            params["company_id"] = company_id
+            products = conn.execute(
+                text(f"SELECT * FROM products WHERE id IN ({placeholders}) AND company_id=:company_id"),
+                params
+            ).fetchall()
+            prod_cols = [col[1] for col in conn.execute(text("PRAGMA table_info(products)")).fetchall()]
+            qty_map = {item[0]: item[1] for item in items}
+            remark_map = {item[0]: (item[2] or "") for item in items}
 
-        # 生成日期
-        doc.add_paragraph(f"生成日期：{datetime.now().strftime('%Y年%m月%d日')}")
+            # 写入 Excel
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            assert ws is not None
+            # Excel 工作簿名称不允许: \ / ? * [ ] : 等字符
+            safe_name = re.sub(r'[\\/?*\[\]:]', '_', plan_name) if plan_name else "方案"
+            ws.title = safe_name[:31]  # Excel sheet name max 31 chars
 
-        # 需求概述
-        doc.add_heading('一、需求概述', level=1)
-        req_text = plan_dict.get("requirement") or "（无）"
-        doc.add_paragraph(req_text)
+            header_font = Font(bold=True, color="FFFFFF", size=11)
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_alignment = Alignment(horizontal="center", vertical="center")
+            thin_border = Border(
+                left=Side(style="thin"), right=Side(style="thin"),
+                top=Side(style="thin"), bottom=Side(style="thin"),
+            )
 
-        # 方案明细表
-        doc.add_heading('二、方案明细', level=1)
+            # 表头：产品库所有字段 + 数量 + 备注（最后一列）
+            display_fields = [
+                ("序号", 6), ("快查型号", 18), ("型号", 18),
+                ("产品名称", 20), ("品牌", 14), ("一级品类", 14),
+                ("二级品类", 14), ("三级品类", 14), ("备货商谈价(元)", 14), ("报价更新", 14),
+                ("上次进货价(元)", 14), ("进货价(元)", 12), ("零售价(元)", 12),
+                ("折扣率(%)", 10), ("新活动价(元)", 14), ("链接", 30), ("投标价(元)", 12),
+                ("集采价/项目(元)", 14), ("代发价(元)", 12), ("毛重(kg)", 10),
+                ("箱规", 12), ("合作等级", 12), ("供货状态", 12),
+                ("规格", 20), ("备注(产品)", 20), ("代发运费(元)", 14),
+                ("69码", 16), ("销量", 10), ("推荐理由", 20),
+                ("参数", 20), ("3C", 16), ("图片", 15),
+                ("数量", 10), ("备注", 20),  # 最后两列是数量和备注
+            ]
 
-        if items_list:
-            table = doc.add_table(rows=1, cols=7)
-            table.style = 'Table Grid'
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-            # 表头
-            header_cells = table.rows[0].cells
-            headers = ['序号', '商品型号', '商品名称', '品牌', '单价(元)', '数量', '小计(元)']
-            for i, h in enumerate(headers):
-                header_cells[i].text = h
-                for paragraph in header_cells[i].paragraphs:
-                    for run in paragraph.runs:
-                        run.bold = True
+            for col_idx, (header_text, width) in enumerate(display_fields, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header_text)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = thin_border
+                ws.column_dimensions[get_column_letter(col_idx)].width = width
 
             # 数据行
-            for idx, item in enumerate(items_list, 1):
-                row_cells = table.add_row().cells
-                row_cells[0].text = str(idx)
-                row_cells[1].text = item.get("product_model", "")
-                row_cells[2].text = item.get("product_name", "")
-                row_cells[3].text = item.get("brand", "")
-                row_cells[4].text = f"{item.get('price', 0):.2f}"
-                row_cells[5].text = str(item.get("quantity", 1))
-                row_cells[6].text = f"{item.get('subtotal', 0):.2f}"
+            price_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+            for row_idx, prod in enumerate(products, 2):
+                p = dict(zip(prod_cols, prod))
+                pid = p["id"]
+                qty = qty_map.get(pid, 1)
+                remark = remark_map.get(pid, "")
 
-            # 汇总行
-            total_amount = plan_dict.get("total_amount", 0)
-            total_qty = sum(item.get("quantity", 0) for item in items_list)
-            row_cells = table.add_row().cells
-            row_cells[0].text = ""
-            row_cells[1].text = "合计"
-            row_cells[2].text = ""
-            row_cells[3].text = f"{len(items_list)} 种商品"
-            row_cells[4].text = ""
-            row_cells[5].text = str(total_qty)
-            row_cells[6].text = f"{total_amount:.2f}"
+                values = [
+                    row_idx - 1, p.get("quick_model", ""), p.get("product_model", ""),
+                    p.get("product_name", ""), p.get("brand", ""), p.get("category_level1", ""),
+                    p.get("category_level2", ""), p.get("category_level3", ""), p.get("negotiation_price") or 0, normalize_datetime_string(p.get("price_update", "")),
+                    p.get("last_purchase_price") or 0, p.get("purchase_price") or 0, p.get("retail_price") or 0,
+                    p.get("discount_rate") or 0, p.get("new_event_price") or 0, p.get("shop_url", ""), p.get("bid_price") or 0,
+                    p.get("group_purchase_price") or 0, p.get("price") or 0, p.get("gross_weight") or 0,
+                    p.get("box_spec", ""), p.get("cooperation_level", ""), p.get("supply_status", ""),
+                    p.get("specification", ""), p.get("remark", ""), p.get("shipping_fee") or 0,
+                    p.get("barcode_69", ""), p.get("sales_volume") or 0, p.get("recommendation", ""),
+                    p.get("parameters", ""), p.get("cert_3c", ""),
+                    "",  # 图片占位（后面单独处理）
+                    qty, remark,  # 数量和备注
+                ]
+                for col_idx, val in enumerate(values, 1):
+                    cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                    cell.border = thin_border
+                    cell.alignment = Alignment(vertical="center")
+                    if col_idx == 19:
+                        cell.fill = price_fill
+                        cell.number_format = '#,##0.00'
+                    elif col_idx in (9, 11, 12, 13, 15, 16, 17, 18, 24, 26):
+                        cell.number_format = '#,##0.00'
 
-        # 备注
-        doc.add_heading('三、备注', level=1)
-        remark = plan_dict.get("remark") or "（无）"
-        doc.add_paragraph(remark)
+                # ---- 图片列：以 TwoCellAnchor 嵌入单元格（随单元格移动/缩放）----
+                if not add_image_embedded_in_cell(
+                    ws, row_idx, 32, p.get("image") or "", col_width=15, row_height=40
+                ):
+                    # 无图或图片解析失败时写入占位文本（openpyxl 类型桩误报为 MergedCell）
+                    ws.cell(row=row_idx, column=32).value = "[图片]"  # type: ignore[union-attr, assignment]
 
-        # 保存到内存
-        buf = io.BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-        return buf.getvalue()
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = f"A1:{get_column_letter(len(display_fields))}{len(products) + 1}"
+
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+
+        return buf.getvalue(), f"{plan_name}.xlsx"
 
 
 solution_service = SolutionService()

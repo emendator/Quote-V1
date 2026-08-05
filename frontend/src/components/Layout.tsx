@@ -1,23 +1,28 @@
 import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Typography, Badge, Dropdown, Avatar, Space, Modal, Form, Input, Button, Tag, message } from 'antd';
+import { Layout, Menu, Typography, Badge, Dropdown, Avatar, Space, Modal, Form, Input, Button, Tag, message, Alert, Card, Descriptions } from 'antd';
 import {
     SearchOutlined,
     DatabaseOutlined,
-    CloudServerOutlined,
-    FileTextOutlined,
     BulbOutlined,
     KeyOutlined,
     UserOutlined,
     LogoutOutlined,
     LockOutlined,
     SettingOutlined,
+    ApiOutlined,
+    MenuFoldOutlined,
+    MenuUnfoldOutlined,
+    CheckCircleOutlined,
+    CloseCircleOutlined,
+    ThunderboltOutlined,
+    SafetyOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../store/AuthContext';
-import { changePassword } from '../services/api';
+import { changePassword, updateApiKey, changeCompanyPassword } from '../services/api';
 
 const { Header, Sider, Content } = Layout;
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 
 // 计算购物车中的商品数量
 function getCartCount(): number {
@@ -31,11 +36,32 @@ function getCartCount(): number {
 export default function AppLayout() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user, logout, isSuperAdmin, isAdmin } = useAuth();
+    const { user, logout, isSuperAdmin, isAdmin, refreshUser } = useAuth();
     const [cartCount, setCartCount] = useState(getCartCount);
     const [pwdModalOpen, setPwdModalOpen] = useState(false);
+
+    // 侧边栏折叠状态（持久化到 localStorage）
+    const [siderCollapsed, setSiderCollapsed] = useState(() => {
+        return localStorage.getItem('sider_collapsed') === 'true';
+    });
     const [pwdForm] = Form.useForm();
     const [pwdLoading, setPwdLoading] = useState(false);
+
+    // API Key 弹窗
+    const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+    const [apiKeyForm] = Form.useForm();
+    const [apiKeyLoading, setApiKeyLoading] = useState(false);
+
+    // 公司数据库密码弹窗
+    const [cpwdModalOpen, setCpwdModalOpen] = useState(false);
+    const [cpwdForm] = Form.useForm();
+    const [cpwdLoading, setCpwdLoading] = useState(false);
+
+    // 账号过期提醒
+    const expiresAt = user?.expires_at ? new Date(user.expires_at) : null;
+    const daysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+    const showExpiryWarning = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
+    const expiresAtString = expiresAt ? expiresAt.toLocaleString() : '';
 
     useEffect(() => {
         const handler = () => setCartCount(getCartCount());
@@ -43,9 +69,9 @@ export default function AppLayout() {
         return () => window.removeEventListener('solutionCartChange', handler);
     }, []);
 
-    // 检查管理员是否需完善公司信息
+    // 检查是否需完善公司信息（绑定公司名称 + 公司数据库密码）
     useEffect(() => {
-        if (user?.role === 'admin' && !user.company_name) {
+        if (user && !user.company_id) {
             navigate('/company-info', { replace: true });
         }
     }, [user, navigate]);
@@ -69,6 +95,39 @@ export default function AppLayout() {
         }
     };
 
+    const handleSaveApiKey = async (values: { api_key: string }) => {
+        setApiKeyLoading(true);
+        try {
+            await updateApiKey(values.api_key);
+            message.success('API Key 已保存（加密存储）');
+            setApiKeyModalOpen(false);
+            apiKeyForm.resetFields();
+            refreshUser();
+        } catch (err: any) {
+            message.error(err.message || '保存失败');
+        } finally {
+            setApiKeyLoading(false);
+        }
+    };
+
+    const handleChangeCompanyPassword = async (values: { old_password: string; new_password: string; company_name?: string }) => {
+        setCpwdLoading(true);
+        try {
+            await changeCompanyPassword({
+                old_password: values.old_password,
+                new_password: values.new_password,
+                company_name: values.company_name || '',
+            });
+            message.success('公司数据库密码修改成功');
+            setCpwdModalOpen(false);
+            cpwdForm.resetFields();
+        } catch (err: any) {
+            message.error(err.message || '修改失败');
+        } finally {
+            setCpwdLoading(false);
+        }
+    };
+
     const roleLabel = isSuperAdmin ? '最高级管理员' : isAdmin ? '管理员' : '用户';
     const roleColor = isSuperAdmin ? 'red' : isAdmin ? 'blue' : 'green';
 
@@ -85,11 +144,39 @@ export default function AppLayout() {
         },
         { type: 'divider' as const },
         {
+            key: 'company',
+            icon: <SettingOutlined />,
+            label: '修改公司信息',
+            onClick: () => navigate('/company-info?edit=1'),
+        },
+        {
+            key: 'apikey',
+            icon: <ApiOutlined />,
+            label: (
+                <span>
+                    API Key 配置
+                    {user?.has_api_key
+                        ? <Tag color="success" style={{ marginLeft: 6, fontSize: 10 }}>已配置</Tag>
+                        : <Tag color="warning" style={{ marginLeft: 6, fontSize: 10 }}>未配置</Tag>
+                    }
+                </span>
+            ),
+            onClick: () => setApiKeyModalOpen(true),
+        },
+        {
             key: 'password',
             icon: <LockOutlined />,
             label: '修改密码',
             onClick: () => setPwdModalOpen(true),
         },
+        ...(isSuperAdmin || isAdmin ? [
+            {
+                key: 'company-pwd',
+                icon: <SafetyOutlined />,
+                label: '修改公司数据库密码',
+                onClick: () => setCpwdModalOpen(true),
+            },
+        ] : []),
         {
             key: 'logout',
             icon: <LogoutOutlined />,
@@ -101,24 +188,20 @@ export default function AppLayout() {
     const menuItems = [
         { key: '/', icon: <SearchOutlined />, label: '智能查询' },
         { key: '/data', icon: <DatabaseOutlined />, label: '数据管理' },
-        { key: '/platforms', icon: <CloudServerOutlined />, label: '平台管理' },
-        { key: '/listing-logs', icon: <FileTextOutlined />, label: '上架日志' },
         {
             key: '/solutions', icon: <BulbOutlined />,
             label: cartCount > 0 ? <span>智能方案 <Badge count={cartCount} size="small" style={{ marginLeft: 4 }} /></span> : '智能方案',
         },
         ...(isSuperAdmin || isAdmin ? [
-            { key: '/invite-codes', icon: <KeyOutlined />, label: '邀请码管理' },
+            { key: '/invite-codes', icon: <KeyOutlined />, label: '用户管理' },
         ] : []),
     ];
 
     const pageTitles: Record<string, string> = {
         '/': '🔍 智能报价查询',
         '/data': '📋 商品数据管理',
-        '/platforms': '☁️ 平台配置管理',
-        '/listing-logs': '📄 上架日志',
         '/solutions': '💡 智能方案',
-        '/invite-codes': '🔑 邀请码管理',
+        '/invite-codes': '用户管理',
     };
 
     return (
@@ -126,12 +209,23 @@ export default function AppLayout() {
             <Sider
                 width={200}
                 style={{ background: '#fff' }}
-                breakpoint="lg"
-                collapsedWidth="60"
+                collapsible
+                collapsed={siderCollapsed}
+                onCollapse={(value) => {
+                    setSiderCollapsed(value);
+                    localStorage.setItem('sider_collapsed', String(value));
+                }}
+                collapsedWidth={48}
+                trigger={null}
             >
-                <div style={{ padding: '20px 16px', textAlign: 'center' }}>
-                    <Title level={5} style={{ margin: 0, color: '#1677ff' }}>
-                        💰 智能报价
+                <div style={{
+                    padding: siderCollapsed ? '20px 0' : '20px 16px',
+                    textAlign: 'center',
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                }}>
+                    <Title level={5} style={{ margin: 0, color: '#1677ff', fontSize: siderCollapsed ? 14 : undefined }}>
+                        {siderCollapsed ? '💰' : '💰 智能报价'}
                     </Title>
                 </div>
                 <Menu
@@ -140,7 +234,35 @@ export default function AppLayout() {
                     items={menuItems}
                     onClick={({ key }) => navigate(key)}
                     style={{ borderRight: 0 }}
+                    inlineCollapsed={siderCollapsed}
                 />
+                {/* 折叠/展开按钮固定在底部 */}
+                <div
+                    onClick={() => {
+                        const next = !siderCollapsed;
+                        setSiderCollapsed(next);
+                        localStorage.setItem('sider_collapsed', String(next));
+                    }}
+                    style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        width: '100%',
+                        height: 48,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        borderTop: '1px solid #f0f0f0',
+                        color: '#8c8c8c',
+                        fontSize: 16,
+                        transition: 'all 0.2s',
+                        background: '#fff',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#1677ff'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = '#8c8c8c'; }}
+                >
+                    {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                </div>
             </Sider>
             <Layout>
                 <Header style={{
@@ -164,6 +286,14 @@ export default function AppLayout() {
                     </Dropdown>
                 </Header>
                 <Content style={{ padding: 24, overflow: 'auto' }}>
+                    {showExpiryWarning && (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message={`您的账号将于 ${daysLeft === 0 ? '今天' : `${daysLeft} 天后`}过期（${expiresAtString}），过期后将被禁止登录，请联系管理员续期。`}
+                        />
+                    )}
                     <Outlet />
                 </Content>
             </Layout>
@@ -220,6 +350,150 @@ export default function AppLayout() {
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                             <Button onClick={() => setPwdModalOpen(false)}>取消</Button>
                             <Button type="primary" htmlType="submit" loading={pwdLoading}>确认修改</Button>
+                        </div>
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            {/* API Key 配置弹窗 */}
+            <Modal
+                title={<span><ApiOutlined /> DeepSeek API Key 配置</span>}
+                open={apiKeyModalOpen}
+                onCancel={() => setApiKeyModalOpen(false)}
+                footer={null}
+                destroyOnClose
+                width={560}
+            >
+                <Alert
+                    message="需要 DeepSeek API Key"
+                    description="本系统的 AI 智能查询和智能方案功能需要 DeepSeek API Key 才能使用。请前往 platform.deepseek.com 获取您的 API Key，注意以 sk- 开头。"
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 20 }}
+                />
+
+                <Card size="small" title="当前状态" style={{ marginBottom: 20 }}>
+                    <Descriptions column={1} size="small">
+                        <Descriptions.Item label="API Key 状态">
+                            {user?.has_api_key ? (
+                                <Tag icon={<CheckCircleOutlined />} color="success">已配置</Tag>
+                            ) : (
+                                <Tag icon={<CloseCircleOutlined />} color="error">未配置</Tag>
+                            )}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="累计 Token 消耗">
+                            <Text><ThunderboltOutlined /> {(user?.total_tokens_used ?? 0).toLocaleString()} Tokens</Text>
+                        </Descriptions.Item>
+                    </Descriptions>
+                </Card>
+
+                <Card size="small" title={user?.has_api_key ? "更新 API Key" : "设置 API Key"}>
+                    <Form
+                        form={apiKeyForm}
+                        layout="vertical"
+                        onFinish={handleSaveApiKey}
+                    >
+                        <Form.Item
+                            name="api_key"
+                            rules={[{ required: true, message: '请输入 API Key' }]}
+                        >
+                            <Input.Password
+                                prefix={<KeyOutlined />}
+                                placeholder={user?.has_api_key ? "输入新的 API Key 以替换现有 Key" : "粘贴您的 DeepSeek API Key（sk-...）"}
+                                autoComplete="off"
+                                size="large"
+                            />
+                        </Form.Item>
+                        <Form.Item style={{ marginBottom: 0 }}>
+                            <Button
+                                type="primary"
+                                htmlType="submit"
+                                loading={apiKeyLoading}
+                                block
+                                size="large"
+                            >
+                                {user?.has_api_key ? '更新 API Key' : '保存 API Key'}
+                            </Button>
+                        </Form.Item>
+                    </Form>
+                    <Paragraph type="secondary" style={{ marginTop: 12, fontSize: 12, marginBottom: 0 }}>
+                        API Key 将使用加密存储，不会以明文形式保存在数据库中。
+                    </Paragraph>
+                </Card>
+            </Modal>
+
+            {/* 修改公司数据库密码弹窗（仅管理员/最高级管理员） */}
+            <Modal
+                title={<span><SafetyOutlined /> 修改公司数据库密码</span>}
+                open={cpwdModalOpen}
+                onCancel={() => setCpwdModalOpen(false)}
+                footer={null}
+                destroyOnClose
+            >
+                <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 20 }}
+                    message="公司数据库密码"
+                    description={
+                        isSuperAdmin
+                            ? `最高级管理员可修改任意公司的数据库密码：填写下方「目标公司」即可（留空=当前公司「${user?.company_name || '-'}」）。修改后原密码立即失效，成员需用新密码重新加入/访问。`
+                            : `当前公司：${user?.company_name || '-'}。仅可修改本公司数据库密码，修改后原密码立即失效，成员需用新密码重新加入/访问。`
+                    }
+                />
+                <Form
+                    form={cpwdForm}
+                    layout="vertical"
+                    onFinish={handleChangeCompanyPassword}
+                >
+                    {isSuperAdmin && (
+                        <Form.Item
+                            name="company_name"
+                            label="目标公司"
+                            extra="留空则修改当前公司；可填写任意公司名以修改其密码"
+                        >
+                            <Input placeholder="输入要修改密码的公司名称（默认当前公司）" />
+                        </Form.Item>
+                    )}
+                    <Form.Item
+                        name="old_password"
+                        label="当前公司数据库密码"
+                        rules={[{ required: true, message: '请输入当前公司数据库密码' }]}
+                    >
+                        <Input.Password placeholder="请输入当前公司数据库密码" />
+                    </Form.Item>
+                    <Form.Item
+                        name="new_password"
+                        label="新公司数据库密码"
+                        rules={[
+                            { required: true, message: '请输入新公司数据库密码' },
+                            { min: 6, message: '密码至少6个字符' },
+                        ]}
+                    >
+                        <Input.Password placeholder="请输入新公司数据库密码" />
+                    </Form.Item>
+                    <Form.Item
+                        name="confirm_password"
+                        label="确认新公司数据库密码"
+                        dependencies={['new_password']}
+                        rules={[
+                            { required: true, message: '请确认新公司数据库密码' },
+                            ({ getFieldValue }) => ({
+                                validator(_, value) {
+                                    if (!value || getFieldValue('new_password') === value) {
+                                        return Promise.resolve();
+                                    }
+                                    return Promise.reject(new Error('两次输入不一致'));
+                                },
+                            }),
+                        ]}
+                    >
+                        <Input.Password placeholder="请确认新公司数据库密码" />
+                    </Form.Item>
+                    <Form.Item>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <Button onClick={() => setCpwdModalOpen(false)}>取消</Button>
+                            <Button type="primary" htmlType="submit" loading={cpwdLoading}>确认修改</Button>
                         </div>
                     </Form.Item>
                 </Form>

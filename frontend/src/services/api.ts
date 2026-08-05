@@ -11,15 +11,6 @@ import type {
     UploadResult,
     ImportConfirmRequest,
     ImportResult,
-    PlatformConfig,
-    PlatformConfigCreate,
-    PlatformConfigUpdate,
-    TestConnectionResult,
-    ListingSubmitRequest,
-    ListingSubmitResponse,
-    ListingLogQuery,
-    PaginatedListingLogs,
-    ListingLogDetail,
     SolutionAnalyzeRequest,
     SolutionAnalyzeResult,
     SolutionSaveRequest,
@@ -29,8 +20,13 @@ import type {
     RegisterRequest,
     User,
     CompanyInfoUpdate,
+    CompanyBindRequest,
+    CompanyPasswordChangeRequest,
     InviteCode,
     RecommendedProductResponse,
+    ColumnConfigItem,
+    ColumnDisplayConfigData,
+    AvailableColumn,
 } from '../types';
 
 const api = axios.create({
@@ -85,18 +81,13 @@ api.interceptors.response.use(
 
 // ========== 商品 CRUD ==========
 
-export async function fetchProducts(params: ProductQuery): Promise<PaginatedData> {
+export async function fetchProducts(params: ProductQuery & { filters?: string }): Promise<PaginatedData> {
     const res = await api.get<unknown, ApiResponse<PaginatedData>>('/products', { params });
     return res.data;
 }
 
-export async function fetchProduct(id: number): Promise<Product> {
-    const res = await api.get<unknown, ApiResponse<Product>>(`/products/${id}`);
-    return res.data;
-}
-
-export async function fetchProductsByIds(ids: number[]): Promise<Product[]> {
-    const res = await api.post<unknown, ApiResponse<Product[]>>('/products/batch-detail', { ids });
+export async function fetchFilterOptions(): Promise<Record<string, string[]>> {
+    const res = await api.get<unknown, ApiResponse<Record<string, string[]>>>('/products/filter-options');
     return res.data;
 }
 
@@ -154,8 +145,11 @@ export async function exportProducts(
     if (params.price_max !== undefined) queryParts.push(`price_max=${params.price_max}`);
     const queryStr = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
 
-    // 触发文件下载
-    const response = await fetch(`/api/products/export${queryStr}`);
+    // 触发文件下载（使用 fetch 并附带认证 token）
+    const token = localStorage.getItem('auth_token') || '';
+    const response = await fetch(`/api/products/export${queryStr}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
     if (!response.ok) throw new Error('导出失败');
 
     const blob = await response.blob();
@@ -163,6 +157,32 @@ export async function exportProducts(
     const a = document.createElement('a');
     a.href = url;
     a.download = `商品数据_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+}
+
+/**
+ * 导出查询结果中的商品（含图片嵌入）
+ */
+export async function exportQueryResults(productIds: number[]): Promise<void> {
+    const token = localStorage.getItem('auth_token') || '';
+    const response = await fetch('/api/query/export', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ product_ids: productIds }),
+    });
+    if (!response.ok) throw new Error('导出失败');
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `查询结果_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`;
     document.body.appendChild(a);
     a.click();
     window.URL.revokeObjectURL(url);
@@ -234,6 +254,11 @@ export async function deleteSolution(planId: number): Promise<void> {
     await api.delete(`/solution/${planId}`);
 }
 
+export async function getRecommendedSolutions(data: { requirement: string; max_solutions?: number }): Promise<{ solutions: any[]; total_solutions: number; message: string }> {
+    const res = await api.post<unknown, ApiResponse<{ solutions: any[]; total_solutions: number; message: string }>>('/solution/recommended', data);
+    return res.data;
+}
+
 export async function exportSolution(planId: number): Promise<void> {
     const token = localStorage.getItem('auth_token');
     const response = await fetch(`/api/solution/export`, {
@@ -245,69 +270,27 @@ export async function exportSolution(planId: number): Promise<void> {
         body: JSON.stringify({ plan_id: planId }),
     });
     if (!response.ok) throw new Error('导出失败');
-    // 检查响应类型，如果是 JSON 说明后端返回了错误信息（如 404 方案不存在）
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
         const errBody = await response.json();
         throw new Error(errBody?.message || '导出失败');
     }
+    // 从 Content-Disposition 中提取文件名
+    const disposition = response.headers.get('content-disposition') || '';
+    let filename = `方案_${planId}.xlsx`;
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?(.+?)["']?(?:;|$)/i);
+    if (match) {
+        filename = decodeURIComponent(match[1]);
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `方案_${planId}.docx`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
-}
-
-// ========== 平台配置管理 ==========
-
-export async function fetchPlatforms(): Promise<PlatformConfig[]> {
-    const res = await api.get<unknown, ApiResponse<PlatformConfig[]>>('/platforms');
-    return res.data;
-}
-
-export async function createPlatform(data: PlatformConfigCreate): Promise<PlatformConfig> {
-    const res = await api.post<unknown, ApiResponse<PlatformConfig>>('/platforms', data);
-    return res.data;
-}
-
-export async function updatePlatform(id: number, data: PlatformConfigUpdate): Promise<PlatformConfig> {
-    const res = await api.put<unknown, ApiResponse<PlatformConfig>>(`/platforms/${id}`, data);
-    return res.data;
-}
-
-export async function deletePlatform(id: number): Promise<void> {
-    await api.delete(`/platforms/${id}`);
-}
-
-export async function analyzePlatformDoc(url: string): Promise<Record<string, unknown>> {
-    const res = await api.post<unknown, ApiResponse<Record<string, unknown>>>('/platforms/analyze-doc', { url });
-    return res.data;
-}
-
-export async function testPlatformConnection(id: number): Promise<TestConnectionResult> {
-    const res = await api.post<unknown, ApiResponse<TestConnectionResult>>(`/platforms/${id}/test`);
-    return res.data;
-}
-
-// ========== 一键上架 ==========
-
-export async function submitListing(data: ListingSubmitRequest): Promise<ListingSubmitResponse> {
-    const res = await api.post<unknown, ApiResponse<ListingSubmitResponse>>('/listing/submit', data);
-    return res.data;
-}
-
-export async function fetchListingLogs(params: ListingLogQuery = {}): Promise<PaginatedListingLogs> {
-    const res = await api.get<unknown, ApiResponse<PaginatedListingLogs>>('/listing/logs', { params });
-    return res.data;
-}
-
-export async function fetchListingLogDetail(id: number): Promise<ListingLogDetail> {
-    const res = await api.get<unknown, ApiResponse<ListingLogDetail>>(`/listing/logs/${id}`);
-    return res.data;
 }
 
 // ========== 用户认证 ==========
@@ -332,13 +315,26 @@ export async function updateCompanyInfo(data: CompanyInfoUpdate): Promise<User> 
     return res.data;
 }
 
+export async function bindCompany(data: CompanyBindRequest): Promise<User> {
+    const res = await api.post<unknown, ApiResponse<User>>('/company/bind', data);
+    return res.data;
+}
+
+export async function changeCompanyPassword(data: CompanyPasswordChangeRequest): Promise<void> {
+    await api.put('/company/password', data);
+}
+
 export async function changePassword(data: { old_password: string; new_password: string }): Promise<void> {
     await api.put('/auth/me/password', data);
 }
 
+export async function updateApiKey(apiKey: string): Promise<void> {
+    await api.put('/auth/me/apikey', { api_key: apiKey });
+}
+
 // ========== 邀请码管理 ==========
 
-export async function createInviteCode(data: { code_type: string; expires_in_days: number }): Promise<InviteCode> {
+export async function createInviteCode(data: { code_type: string; expires_at: string; company_name: string }): Promise<InviteCode> {
     const res = await api.post<unknown, ApiResponse<InviteCode>>('/invites/create', data);
     return res.data;
 }
@@ -352,8 +348,12 @@ export async function deleteInviteCode(id: number): Promise<void> {
     await api.delete(`/invites/${id}`);
 }
 
-export async function verifyInviteCode(code: string): Promise<{ valid: boolean; type: string | null; message: string }> {
-    const res = await api.get<unknown, ApiResponse<{ valid: boolean; type: string | null; message: string }>>(`/invites/verify/${code}`);
+export async function renewInviteCode(id: number, expires_at: string): Promise<void> {
+    await api.post(`/invites/${id}/renew`, { expires_at });
+}
+
+export async function verifyInviteCode(code: string): Promise<{ valid: boolean; type: string | null; message: string; company_name?: string }> {
+    const res = await api.get<unknown, ApiResponse<{ valid: boolean; type: string | null; message: string; company_name?: string }>>(`/invites/verify/${code}`);
     return res.data;
 }
 
@@ -361,5 +361,22 @@ export async function verifyInviteCode(code: string): Promise<{ valid: boolean; 
 
 export async function getRecommendedProducts(data: { filters?: Record<string, unknown>; page?: number; page_size?: number }): Promise<RecommendedProductResponse> {
     const res = await api.post<unknown, ApiResponse<RecommendedProductResponse>>('/products/recommended', data);
+    return res.data;
+}
+
+// ========== 列显示配置 ==========
+
+export async function getColumnDisplayConfig(pageType: string): Promise<ColumnDisplayConfigData> {
+    const res = await api.get<unknown, ApiResponse<ColumnDisplayConfigData>>(`/column-display/${pageType}`);
+    return res.data;
+}
+
+export async function updateColumnDisplayConfig(pageType: string, columns: ColumnConfigItem[]): Promise<ColumnDisplayConfigData> {
+    const res = await api.put<unknown, ApiResponse<ColumnDisplayConfigData>>(`/column-display/${pageType}`, { columns });
+    return res.data;
+}
+
+export async function getAvailableColumns(pageType: string): Promise<{ page_type: string; columns: AvailableColumn[] }> {
+    const res = await api.get<unknown, ApiResponse<{ page_type: string; columns: AvailableColumn[] }>>(`/column-display/available-columns/${pageType}`);
     return res.data;
 }

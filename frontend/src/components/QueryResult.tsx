@@ -1,8 +1,9 @@
 import { Table, Card, Tag, Empty, Typography, Space, Button, Alert, Tooltip } from 'antd';
 import { DownOutlined, RightOutlined, OrderedListOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import type { Product, ParsedQuery, SmartQueryResult, BatchModelQueryResult, BatchModelQueryItem } from '../types';
-import { useState, useEffect, useCallback } from 'react';
+import type { Product, ParsedQuery, SmartQueryResult, BatchModelQueryResult, BatchModelQueryItem, ColumnConfigItem } from '../types';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { getColumnDisplayConfig } from '../services/api';
 
 const { Text, Title } = Typography;
 
@@ -55,6 +56,17 @@ const fmtDate = (v: string | null | undefined) => {
     return m ? m[1] : v;
 };
 
+// 链接渲染：检测 URL 并显示为可点击的超链接
+const renderUrl = (v: string | null | undefined) => {
+    if (!v || v === '') return '-';
+    const url = v.startsWith('http://') || v.startsWith('https://') ? v : `https://${v}`;
+    return (
+        <a href={url} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}>
+            {v}
+        </a>
+    );
+};
+
 // 图片渲染：Base64 缩略图，点击放大
 const renderImage = (v: string | null | undefined) => {
     if (!v || v === '') return '-';
@@ -86,9 +98,9 @@ const dateSort = (a: string | null | undefined, b: string | null | undefined): n
 const batchColumns: ColumnsType<Product> = [
     { title: '图片', dataIndex: 'image', key: 'image', width: 55, render: (v) => renderImage(v) },
     { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: true, render: (v) => <Text strong>{v || '-'}</Text> },
-    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '品牌', dataIndex: 'brand', key: 'brand', width: 55, render: (v) => v || '-' },
-    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 95, sorter: (a, b) => dateSort(a.price_update, b.price_update), render: (v) => fmtDate(v) },
     { title: '代发价', dataIndex: 'price', key: 'price', width: 85, sorter: (a, b) => numSort(a.price, b.price), render: (v) => (v !== null && v !== undefined && v !== '' ? <span className="price-highlight" style={{ fontWeight: 'bold', fontSize: 15 }}>¥{Number(v).toFixed(2)}</span> : '-') },
     { title: '进货价', dataIndex: 'purchase_price', key: 'purchase_price', width: 80, sorter: (a, b) => numSort(a.purchase_price, b.purchase_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
@@ -109,9 +121,9 @@ const batchColumns: ColumnsType<Product> = [
 
 const columns: ColumnsType<Product> = [
     { title: '图片', dataIndex: 'image', key: 'image', width: 55, render: (v) => renderImage(v) },
-    { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 115, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 125, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 115, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
+    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 125, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
+    { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '品牌', dataIndex: 'brand', key: 'brand', width: 55, render: (v) => v || '-' },
     { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 75, render: (v) => v || '-' },
     { title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 75, render: (v) => v || '-' },
@@ -125,19 +137,19 @@ const columns: ColumnsType<Product> = [
     { title: '集采价', dataIndex: 'group_purchase_price', key: 'group_purchase_price', width: 75, sorter: (a, b) => numSort(a.group_purchase_price, b.group_purchase_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
     { title: '投标价', dataIndex: 'bid_price', key: 'bid_price', width: 75, sorter: (a, b) => numSort(a.bid_price, b.bid_price), render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
     { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 65, sorter: (a, b) => numSort(a.discount_rate, b.discount_rate), render: (v) => (v ? `${v}%` : '-') },
-    { title: '链接', dataIndex: 'shop_url', key: 'shop_url', width: 150, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '链接', dataIndex: 'shop_url', key: 'shop_url', width: 150, render: (v) => renderUrl(v) },
     { title: '69码', dataIndex: 'barcode_69', key: 'barcode_69', width: 140, render: (v) => v || '-' },
-    { title: '规格', dataIndex: 'specification', key: 'specification', width: 110, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '规格', dataIndex: 'specification', key: 'specification', width: 110, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '箱规', dataIndex: 'box_spec', key: 'box_spec', width: 110, render: (v) => v || '-' },
     { title: '合作等级', dataIndex: 'cooperation_level', key: 'cooperation_level', width: 65, render: (v) => v || '-' },
     { title: '供货状态', dataIndex: 'supply_status', key: 'supply_status', width: 65, render: (v) => v || '-' },
     { title: '毛重(kg)', dataIndex: 'gross_weight', key: 'gross_weight', width: 65, render: (v) => (v ? v.toFixed(2) : '-') },
     { title: '代发运费', dataIndex: 'shipping_fee', key: 'shipping_fee', width: 75, render: (v) => (v ? `¥${v.toFixed(2)}` : '-') },
     { title: '销量', dataIndex: 'sales_volume', key: 'sales_volume', width: 55 },
-    { title: '推荐理由', dataIndex: 'recommendation', key: 'recommendation', width: 130, ellipsis: true, render: (v) => renderEllipsis(v) },
-    { title: '参数', dataIndex: 'parameters', key: 'parameters', width: 100, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '推荐理由', dataIndex: 'recommendation', key: 'recommendation', width: 130, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
+    { title: '参数', dataIndex: 'parameters', key: 'parameters', width: 100, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '3C', dataIndex: 'cert_3c', key: 'cert_3c', width: 65, render: (v) => v || '-' },
-    { title: '备注', dataIndex: 'remark', key: 'remark', width: 140, ellipsis: true, render: (v) => renderEllipsis(v) },
+    { title: '备注', dataIndex: 'remark', key: 'remark', width: 140, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     {
         title: '方案', key: 'solution', width: 70, fixed: 'right',
         render: (_: unknown, record: Product) => {
@@ -160,9 +172,24 @@ interface Props {
     batchMode?: boolean;
     selectedRowKeys?: number[];
     onSelectionChange?: (keys: number[]) => void;
+    pageType?: 'query_result' | 'batch_query';
+    configVersion?: number;
 }
 
-export default function QueryResult({ result, batchMode, selectedRowKeys, onSelectionChange }: Props) {
+export default function QueryResult({ result, batchMode, selectedRowKeys, onSelectionChange, pageType, configVersion }: Props) {
+    // 列配置
+    const [columnConfig, setColumnConfig] = useState<ColumnConfigItem[] | null>(null);
+
+    useEffect(() => {
+        if (!pageType) {
+            setColumnConfig(null);
+            return;
+        }
+        getColumnDisplayConfig(pageType)
+            .then(data => setColumnConfig(data.columns || null))
+            .catch(() => setColumnConfig(null));
+    }, [pageType, configVersion]);
+
     // 方案购物车版本号——每次加入/移除时 +1，强制重渲染让按钮状态更新
     const [, setCartVersion] = useState(0);
 
@@ -171,6 +198,39 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
         window.addEventListener('solutionCartChange', handler);
         return () => window.removeEventListener('solutionCartChange', handler);
     }, []);
+
+    // 根据列配置动态生成列定义
+    const effectiveColumns = useMemo(() => {
+        if (!columnConfig || columnConfig.length === 0) return columns;
+        const configMap = new Map(columnConfig.map(c => [c.key, c]));
+        // 过滤可见列 + 应用标题，移除固定宽度使列自适应
+        let filtered = columns
+            .filter(col => {
+                const colKey = String(col.key ?? '');
+                const cfg = configMap.get(colKey);
+                return cfg ? cfg.visible : true;
+            })
+            .map(col => {
+                const colKey = String(col.key ?? '');
+                const cfg = configMap.get(colKey);
+                if (!cfg) return { ...col, width: undefined, fixed: undefined };
+                return {
+                    ...col,
+                    title: cfg.label || col.title,
+                    // 如果配置中指定了列宽则使用，否则不设宽度让列自适应
+                    width: cfg.width || undefined,
+                    fixed: undefined,
+                };
+            });
+        // 排序
+        const orderMap = new Map(columnConfig.map((c, i) => [c.key, i]));
+        filtered.sort((a, b) => {
+            const ai = orderMap.get(String(a.key ?? '')) ?? 999;
+            const bi = orderMap.get(String(b.key ?? '')) ?? 999;
+            return ai - bi;
+        });
+        return filtered;
+    }, [columnConfig]);
 
     // 行选择配置（导出使用）
     const rowSelection = selectedRowKeys !== undefined && onSelectionChange ? {
@@ -192,7 +252,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
     };
     const isExpanded = (idx: number) => !collapsed.has(idx);
 
-    // ========== 批量查询结果渲染 ==========
+    // ========== 批量查询结果渲染（统一滑动条控制） ==========
     if (batchMode && result && 'total_queries' in result) {
         const batchResult = result as BatchModelQueryResult;
         if (batchResult.total_queries === 0) {
@@ -203,6 +263,68 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                 />
             );
         }
+
+        // 将所有子查询结果合并到一个扁平数组中，每行附加 source_query 字段标识来源
+        const flatDataSource: (Product & { source_query: string })[] = [];
+        batchResult.items.forEach((item: BatchModelQueryItem) => {
+            if (item.results) {
+                item.results.forEach(p => {
+                    flatDataSource.push({ ...p, source_query: item.query });
+                });
+            }
+        });
+
+        // 统一列定义：在原来 batchColumns 最前面插入「查询来源」列
+        // 类型用 any 绕过 batchColumns(ColumnsType<Product>) 与泛型不兼容的 TS 限制
+        const baseBatchCols: any[] = batchColumns.map(col => {
+            if (col.key === 'solution') return col;
+            return { ...col, fixed: undefined };
+        });
+
+        // 根据列配置过滤/排序
+        const unifiedColumns: any[] = (() => {
+            let cols: any[] = [
+                {
+                    title: '查询来源',
+                    dataIndex: 'source_query',
+                    key: 'source_query',
+                    width: 130,
+                    fixed: 'left',
+                    render: (v: string) => <Tag color="blue">{v}</Tag>,
+                },
+                ...baseBatchCols,
+            ];
+            if (columnConfig && columnConfig.length > 0) {
+                const configMap = new Map(columnConfig.map(c => [c.key, c]));
+                cols = cols.filter((col: any) => {
+                    if (col.key === 'source_query') return true;
+                    const cfg = configMap.get(col.key);
+                    return cfg ? cfg.visible : true;
+                }).map((col: any) => {
+                    if (col.key === 'source_query') return col;
+                    const cfg = configMap.get(col.key);
+                    if (!cfg) return { ...col, width: undefined, fixed: undefined };
+                    return {
+                        ...col,
+                        title: cfg.label || col.title,
+                        // 如果配置中指定了列宽则使用，否则不设宽度让列自适应
+                        width: cfg.width || undefined,
+                        fixed: undefined,
+                    };
+                });
+                // 按配置顺序排序
+                const orderMap = new Map(columnConfig.map((c, i) => [c.key, i]));
+                cols.sort((a: any, b: any) => {
+                    if (a.key === 'source_query') return -1;
+                    if (b.key === 'source_query') return 1;
+                    const ai = orderMap.get(a.key) ?? 999;
+                    const bi = orderMap.get(b.key) ?? 999;
+                    return ai - bi;
+                });
+            }
+            return cols;
+        })();
+
         return (
             <div className="result-section">
                 <Alert
@@ -217,52 +339,30 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                     }
                     style={{ marginBottom: 16 }}
                 />
-                {batchResult.items.map((item: BatchModelQueryItem, idx: number) => {
-                    const itemExpanded = isExpanded(idx);
-                    const hasResults = item.count > 0;
-                    return (
-                        <Card
-                            key={idx}
-                            className="result-card"
-                            size="small"
-                            style={{ marginBottom: 12 }}
-                            title={
-                                <Space>
-                                    <Button
-                                        type="text"
-                                        size="small"
-                                        icon={itemExpanded ? <DownOutlined /> : <RightOutlined />}
-                                        onClick={() => toggleCard(idx)}
-                                    />
-                                    <Tag color={hasResults ? 'blue' : 'default'}>快查型号</Tag>
-                                    <Text strong style={{ fontSize: 14 }}>{item.query}</Text>
-                                    <Tag color={hasResults ? 'success' : 'error'}>{item.count} 条结果</Tag>
-                                </Space>
-                            }
-                            extra={
-                                <Button size="small" type="link" onClick={() => toggleCard(idx)}>
-                                    {itemExpanded ? '收起' : '展开'}
-                                </Button>
-                            }
-                        >
-                            {itemExpanded && (
-                                hasResults ? (
-                                    <Table
-                                        columns={batchColumns}
-                                        dataSource={item.results}
-                                        rowKey="id"
-                                        size="small"
-                                        pagination={false}
-                                        scroll={{ x: 1100 }}
-                                        rowSelection={rowSelection}
-                                    />
-                                ) : (
-                                    <Empty description={item.message} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                                )
-                            )}
-                        </Card>
-                    );
-                })}
+                <Card
+                    size="small"
+                    title={
+                        <Space>
+                            <OrderedListOutlined />
+                            <span>批量查询结果 — 统一展示（共 {flatDataSource.length} 行）</span>
+                        </Space>
+                    }
+                >
+                    <Table
+                        columns={unifiedColumns}
+                        dataSource={flatDataSource}
+                        rowKey="id"
+                        size="small"
+                        pagination={{
+                            defaultPageSize: 50,
+                            showSizeChanger: true,
+                            pageSizeOptions: ['20', '50', '100', '200', '500'],
+                            showTotal: (t: number) => `共 ${t} 条`,
+                        }}
+                        scroll={{ x: columnConfig ? 800 : 1600, y: 600 }}
+                        rowSelection={rowSelection}
+                    />
+                </Card>
             </div>
         );
     }
@@ -316,7 +416,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                 >
                     {smartResult.results.length > 0 ? (
                         <Table
-                            columns={columns}
+                            columns={effectiveColumns}
                             dataSource={smartResult.results}
                             rowKey="id"
                             size="middle"
@@ -326,7 +426,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                                 pageSizeOptions: ['10', '20', '50', '100', '200', '500', '1000'],
                                 showTotal: (t: number) => `共 ${t} 条`,
                             }}
-                            scroll={{ x: 2400 }}
+                            scroll={{ x: columnConfig ? 800 : 2400 }}
                             rowSelection={rowSelection}
                         />
                     ) : (
@@ -373,12 +473,12 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                         >
                             {isExpanded && (pq.results.length > 0 ? (
                                 <Table
-                                    columns={columns}
+                                    columns={effectiveColumns}
                                     dataSource={pq.results}
                                     rowKey="id"
                                     size="small"
                                     pagination={false}
-                                    scroll={{ x: 2400 }}
+                                    scroll={{ x: columnConfig ? 800 : 2400 }}
                                     rowSelection={rowSelection}
                                 />
                             ) : (
@@ -407,7 +507,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
             >
                 {smartResult.results.length > 0 ? (
                     <Table
-                        columns={columns}
+                        columns={effectiveColumns}
                         dataSource={smartResult.results}
                         rowKey="id"
                         size="middle"
@@ -417,7 +517,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                             pageSizeOptions: ['10', '20', '50', '100', '200', '500', '1000'],
                             showTotal: (t) => `共 ${t} 条`,
                         }}
-                        scroll={{ x: 2400 }}
+                        scroll={{ x: columnConfig ? 800 : 2400 }}
                         rowSelection={rowSelection}
                     />
                 ) : (

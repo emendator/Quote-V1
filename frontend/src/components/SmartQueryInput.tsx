@@ -1,4 +1,4 @@
-import { Input, Button, Space, Switch, Tooltip } from 'antd';
+import { Input, Button, Space, Switch, Tooltip, message } from 'antd';
 import { SearchOutlined, ThunderboltOutlined, UnorderedListOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
@@ -7,12 +7,14 @@ interface Props {
     value?: string;
     aiMode?: boolean;
     batchMode?: boolean;
+    hasApiKey?: boolean;
+    tokensUsed?: number;
     onValueChange?: (text: string, ai: boolean, batch?: boolean) => void;
     onQuery: (text: string, useAI: boolean, useBatch?: boolean) => void;
     loading: boolean;
 }
 
-export default function SmartQueryInput({ value, aiMode, batchMode, onValueChange, onQuery, loading }: Props) {
+export default function SmartQueryInput({ value, aiMode, batchMode, hasApiKey, tokensUsed, onValueChange, onQuery, loading }: Props) {
     const isControlled = value !== undefined;
 
     const handleSearch = () => {
@@ -49,7 +51,7 @@ export default function SmartQueryInput({ value, aiMode, batchMode, onValueChang
                             <Switch
                                 size="small"
                                 checked={batchMode ?? false}
-                                onChange={(v) => onValueChange?.(value ?? '', aiMode ?? false, v)}
+                                onChange={(v) => onValueChange?.(value ?? '', false, v)}
                                 style={{ marginLeft: 4 }}
                             />
                             <span style={{ marginLeft: 4, fontSize: 12, color: batchMode ? '#52c41a' : '#999' }}>
@@ -57,20 +59,29 @@ export default function SmartQueryInput({ value, aiMode, batchMode, onValueChang
                             </span>
                         </span>
                     </Tooltip>
-                    <Tooltip title={aiMode ? 'AI 模式：使用 DeepSeek 分析自然语言' : '普通模式：使用正则规则匹配'}>
-                        <span>
-                            <ThunderboltOutlined style={{ color: aiMode ? '#faad14' : '#d9d9d9' }} />
-                            <Switch
-                                size="small"
-                                checked={aiMode ?? false}
-                                onChange={(v) => onValueChange?.(value ?? '', v, batchMode ?? false)}
-                                style={{ marginLeft: 4 }}
-                            />
-                            <span style={{ marginLeft: 4, fontSize: 12, color: aiMode ? '#faad14' : '#999' }}>
-                                AI
+                    {/* 批量查询为纯规则匹配，不需要 AI 开关，批量模式下隐藏 */}
+                    {!batchMode && (
+                        <Tooltip title={!hasApiKey ? '未配置 API Key，无法使用 AI 模式。请在右上角用户菜单中配置。' : aiMode ? 'AI 模式：使用 DeepSeek 分析自然语言' : '普通模式：使用正则规则匹配'}>
+                            <span>
+                                <ThunderboltOutlined style={{ color: aiMode ? '#faad14' : '#d9d9d9' }} />
+                                <Switch
+                                    size="small"
+                                    checked={aiMode ?? false}
+                                    onChange={(v) => {
+                                        if (!hasApiKey) {
+                                            message.warning('未配置 API Key，无法使用 AI 模式。请在右上角用户菜单中配置。');
+                                            return;
+                                        }
+                                        onValueChange?.(value ?? '', v, batchMode ?? false);
+                                    }}
+                                    style={{ marginLeft: 4 }}
+                                />
+                                <span style={{ marginLeft: 4, fontSize: 12, color: aiMode ? '#faad14' : '#999' }}>
+                                    AI
+                                </span>
                             </span>
-                        </span>
-                    </Tooltip>
+                        </Tooltip>
+                    )}
                     <Button
                         type="primary"
                         icon={<SearchOutlined />}
@@ -87,6 +98,11 @@ export default function SmartQueryInput({ value, aiMode, batchMode, onValueChang
                     ? '提示：每行输入一个快查型号，系统会分别查询每个型号的代发价 | 支持模糊匹配'
                     : '提示：按 Enter 快速查询 | Shift+Enter 换行 | 筛选项变动后自动查询'}
             </div>
+            {tokensUsed ? (
+                <div style={{ marginTop: 4, color: '#722ed1', fontSize: 12 }}>
+                    本次查询消耗 <strong>{tokensUsed}</strong> tokens
+                </div>
+            ) : null}
         </div>
     );
 }

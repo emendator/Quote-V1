@@ -1,11 +1,9 @@
 """AI 智能查询服务 —— 调用 DeepSeek API 分析自然语言，提取结构化查询条件"""
-import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
-import httpx
+from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL
+from app.services.api_key_service import call_deepseek_with_user_key
 from app.services.query_engine import query_engine
 from app.services.query_engine import Product
 from sqlalchemy import select, func, or_
@@ -103,13 +101,13 @@ SYSTEM_PROMPT = """你是一个智能报价系统的查询助手。用户的商�
 class AIQueryService:
     """AI 查询服务"""
 
-    async def _get_reference_data(self, db: AsyncSession, owner_id: Optional[int] = None) -> str:
-        """从数据库采样参考数据，帮助 AI 理解实际存在的值（数据隔离）"""
+    async def _get_reference_data(self, db: AsyncSession, company_id: Optional[int] = None) -> str:
+        """从数据库采样参考数据，帮助 AI 理解实际存在的值（数据隔离：按公司ID）"""
         try:
             # 构建基础查询条件
             base_filter = True
-            if owner_id is not None:
-                base_filter = Product.owner_id == owner_id
+            if company_id:
+                base_filter = Product.company_id == company_id
 
             # 查询品牌列表（当前用户数据）
             brand_result = await db.execute(
@@ -135,9 +133,9 @@ class AIQueryService:
             )
             cat3_list = [r[0] for r in cat3_result.fetchall() if r[0]]
 
-            # 查询供货状态（示例1个）
+            # 查询供货状态（示例1个，数据隔离：按公司ID）
             status_result = await db.execute(
-                select(Product.supply_status).distinct().where(Product.supply_status.isnot(None)).where(Product.supply_status != '').limit(1)
+                select(Product.supply_status).distinct().where(Product.supply_status.isnot(None)).where(Product.supply_status != '').where(base_filter).limit(1)
             )
             status_val = status_result.scalar_one_or_none()
 
@@ -162,66 +160,62 @@ class AIQueryService:
             logger.warning(f"获取参考数据失败: {e}")
             return ""
 
-    async def _call_deepseek(self, user_text: str, reference_data: str = "") -> Optional[Dict[str, Any]]:
-        """调用 DeepSeek API"""
+    async def _call_deepseek(self, user_text: str, reference_data: str = "",
+                             user_id: int = 0) -> Tuple[Optional[Dict[str, Any]], int]:
+        """调用 DeepSeek API，返回 (结果, 消耗token数)"""
         # 构建系统提示词：基础提示 + 参考数据
         system_content = SYSTEM_PROMPT
         if reference_data:
             system_content = system_content + "\n\n" + reference_data
 
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": DEEPSEEK_MODEL,
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": user_text},
-            ],
-            "temperature": 0.1,  # 低温度提高一致性
-            "max_tokens": 1024,
-            "stream": False,
-        }
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_text},
+        ]
+
+        data, tokens_used = await call_deepseek_with_user_key(
+            user_id=user_id,
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.1,
+        )
+        if not data:
+            return None, 0
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(DEEPSEEK_API_URL, headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                # 清理可能的 markdown 代码块标记
-                content = content.strip()
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.startswith("```"):
-                    content = content[3:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                content = content.strip()
-                return json.loads(content)
-        except httpx.TimeoutException:
-            logger.error("DeepSeek API 请求超时")
-            return None
+            content = data["choices"][0]["message"]["content"]
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            return json.loads(content), tokens_used
         except Exception as e:
             logger.error(f"DeepSeek API 调用失败: {e}")
-            return None
+            return None, tokens_used
 
-    async def process_query(self, db: AsyncSession, query_text: str, owner_id: Optional[int] = None) -> Dict[str, Any]:
-        """处理 AI 查询（支持数据隔离）"""
+    async def process_query(self, db: AsyncSession, query_text: str, company_id: Optional[int] = None, user_id: int = 0) -> Dict[str, Any]:
+        """处理 AI 查询（支持数据隔离：按公司ID）"""
         # 0. 查询参考数据，帮助 AI 理解数据库中的实际值
-        reference_data = await self._get_reference_data(db, owner_id=owner_id)
+        reference_data = await self._get_reference_data(db, company_id=company_id)
 
         # 1. 调用 DeepSeek 提取结构化条件
-        parsed = await self._call_deepseek(query_text, reference_data)
+        parsed, tokens_used = await self._call_deepseek(query_text, reference_data, user_id=user_id)
 
         if not parsed:
             # API 调用失败，回退到正则引擎
             logger.info("DeepSeek API 不可用，回退到正则查询引擎")
-            return await query_engine.execute_smart_query(db, query_text, owner_id=owner_id)
+            result = await query_engine.execute_smart_query(db, query_text, company_id=company_id)
+            result["tokens_used"] = 0
+            return result
 
         # 2. 根据解析结果执行查询
-        return await self._execute_parsed_query(db, parsed, query_text, owner_id=owner_id)
+        result = await self._execute_parsed_query(db, parsed, query_text, company_id=company_id)
+        result["tokens_used"] = tokens_used
+        return result
 
     def _apply_sort_by(self, query, sort_by: str, sort_order: Optional[str]):
         """按指定字段和方向排序"""
@@ -247,7 +241,7 @@ class AIQueryService:
 
     async def _execute_parsed_query(
         self, db: AsyncSession, parsed: Dict[str, Any], original_text: str,
-        owner_id: Optional[int] = None
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """根据 AI 解析结果执行查询（简化版：从 flat intent 构建 SQL，支持数据隔离）"""
         # 如果没有任何条件，回退到正则引擎
@@ -266,12 +260,12 @@ class AIQueryService:
                        "barcode_69", "quick_model", "product_model", "keywords"]
         )
         if not has_any_condition:
-            return await query_engine.execute_smart_query(db, original_text, owner_id=owner_id)
+            return await query_engine.execute_smart_query(db, original_text, company_id=company_id)
 
         # 构建查询（带数据隔离）
         q = select(Product)
-        if owner_id is not None:
-            q = q.where(Product.owner_id == owner_id)
+        if company_id:
+            q = q.where(Product.company_id == company_id)
         conditions_desc = []
 
         # --- 文本模糊匹配 ---
