@@ -8,6 +8,10 @@ python-multipart==0.0.6
 aiosqlite==0.19.0
 Pillow>=10.0.0
 lxml>=4.9.0
-passlib[bcrypt]==1.7.4
+# passlib 1.7.4 与 bcrypt>=4.x 不兼容（bcrypt 4.x 对 >72 字节密码直接抛 ValueError，
+# 导致 passlib 内部 detect_wrap_bug 初始化失败、hash_password 无法使用）。
+# 必须固定 bcrypt==3.2.2（服务器新装环境极易踩坑，本地旧环境不受影响）。
+passlib==1.7.4
+bcrypt==3.2.2
 pyjwt==2.8.0
 cryptography>=41.0.0
