@@ -9,7 +9,8 @@ const { Title, Text } = Typography;
 const LoginPage: React.FC = () => {
     const [form] = Form.useForm();
     const [loading, setLoading] = React.useState(false);
-    const { login, user } = useAuth();
+    const [guestLoading, setGuestLoading] = React.useState(false);
+    const { login, guestLogin, user } = useAuth();
     const navigate = useNavigate();
 
     // 如果已登录，跳转首页
@@ -29,6 +30,19 @@ const LoginPage: React.FC = () => {
             message.error(err.message || '登录失败');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const onGuestLogin = async () => {
+        setGuestLoading(true);
+        try {
+            await guestLogin();
+            message.success('游客登录成功');
+            navigate('/', { replace: true });
+        } catch (err: any) {
+            message.error(err.message || '游客登录失败');
+        } finally {
+            setGuestLoading(false);
         }
     };
 
@@ -79,6 +93,18 @@ const LoginPage: React.FC = () => {
                             登 录
                         </Button>
                     </Form.Item>
+
+                    {/* 游客登录：可体验核心功能，退出后数据自动清除 */}
+                    <Form.Item style={{ marginBottom: 4 }}>
+                        <Button block loading={guestLoading} onClick={onGuestLogin} style={styles.guestBtn}>
+                            游客登录（体验模式）
+                        </Button>
+                    </Form.Item>
+                    <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                            游客可体验智能查询/数据管理/智能方案，不保留任何数据，退出登录后自动清除全部使用痕迹
+                        </Text>
+                    </div>
 
                     <div style={{ textAlign: 'center' }}>
                         <Text type="secondary">
@@ -132,6 +158,14 @@ const styles: Record<string, React.CSSProperties> = {
         height: 44,
         borderRadius: 8,
         fontSize: 16,
+    },
+    guestBtn: {
+        height: 44,
+        borderRadius: 8,
+        fontSize: 15,
+        borderStyle: 'dashed',
+        color: '#764ba2',
+        borderColor: '#764ba2',
     },
 };
 

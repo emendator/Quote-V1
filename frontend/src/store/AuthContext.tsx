@@ -10,9 +10,11 @@ interface AuthContextType {
     isSuperAdmin: boolean;
     isAdmin: boolean;
     isUser: boolean;
+    isGuest: boolean;
     login: (data: LoginRequest) => Promise<void>;
+    guestLogin: () => Promise<void>;
     register: (data: RegisterRequest) => Promise<void>;
-    logout: () => void;
+    logout: () => Promise<void>;
     updateCompanyInfo: (data: CompanyInfoUpdate) => Promise<void>;
     bindCompany: (data: CompanyBindRequest) => Promise<void>;
     refreshUser: () => Promise<void>;
@@ -57,6 +59,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pageCtx?.clearAllStates();
     };
 
+    const guestLogin = async () => {
+        const result = await api.guestLogin();
+        localStorage.setItem('auth_token', result.access_token);
+        localStorage.setItem('auth_user', JSON.stringify(result.user));
+        setUser(result.user);
+        pageCtx?.clearAllStates();
+    };
+
     const register = async (data: RegisterRequest) => {
         const result = await api.register(data);
         localStorage.setItem('auth_token', result.access_token);
@@ -65,7 +75,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pageCtx?.clearAllStates();
     };
 
-    const logout = () => {
+    const logout = async () => {
+        // 游客退出登录：先清除服务端全部临时数据（不保留任何使用痕迹），再清除本地登录态
+        if (user?.role === 'guest') {
+            try {
+                await api.guestCleanup();
+            } catch {
+                // 忽略：token 可能已失效，本地照常退出
+            }
+        }
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user');
         setUser(null);
@@ -98,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const isSuperAdmin = user?.role === 'super_admin';
     const isAdmin = user?.role === 'admin';
     const isUser = user?.role === 'user';
+    const isGuest = user?.role === 'guest';
 
     return (
         <AuthContext.Provider value={{
@@ -106,7 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isSuperAdmin,
             isAdmin,
             isUser,
+            isGuest,
             login,
+            guestLogin,
             register,
             logout,
             updateCompanyInfo,

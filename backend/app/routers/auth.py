@@ -1,12 +1,12 @@
-"""用户认证 API：登录、注册、获取用户信息、完善公司信息、修改密码"""
+"""用户认证 API：登录、注册、获取用户信息、完善公司信息、修改密码、游客登录"""
 import logging
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
-from app.database import get_db
+from app.database import get_db, sync_engine
 from app.models import User, InviteCode
 from app.schemas import (
     ApiResponse,
@@ -27,6 +27,9 @@ from app.utils.auth_utils import (
 logger = logging.getLogger("auth")
 
 router = APIRouter(prefix="/api/auth", tags=["用户认证"])
+
+# 游客会话有效期（小时）：到期后由系统定时清理，不留任何痕迹
+GUEST_TTL_HOURS = 24
 
 
 def _user_to_response(user: User) -> UserResponse:
@@ -218,3 +221,128 @@ async def change_password(
     await db.flush()
 
     return ApiResponse(message="密码修改成功")
+
+
+# ========== 游客模式 ==========
+
+def _cleanup_guest_session(user_id: int, company_id: int):
+    """清除游客会话的全部痕迹：业务数据、列配置、用户、公司、上传文件与内存缓存"""
+    with sync_engine.connect() as conn:
+        # 1. 删除该游客公司的方案明细（通过方案ID）
+        plan_ids = conn.execute(
+            text("SELECT id FROM solution_plans WHERE company_id = :cid"), {"cid": company_id}
+        ).fetchall()
+        for pid_row in plan_ids:
+            conn.execute(text("DELETE FROM solution_items WHERE plan_id = :pid"), {"pid": pid_row[0]})
+        # 2. 删除该游客公司的方案主表
+        conn.execute(text("DELETE FROM solution_plans WHERE company_id = :cid"), {"cid": company_id})
+        # 3. 删除该游客公司的商品
+        conn.execute(text("DELETE FROM products WHERE company_id = :cid"), {"cid": company_id})
+        # 4. 删除该游客公司的导入日志
+        conn.execute(text("DELETE FROM import_logs WHERE company_id = :cid"), {"cid": company_id})
+        # 5. 删除该游客的列显示配置
+        conn.execute(text("DELETE FROM column_display_configs WHERE user_id = :uid"), {"uid": user_id})
+        # 6. 删除游客用户
+        conn.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": user_id})
+        # 7. 删除游客公司（若该公司已无其他用户）
+        conn.execute(text(
+            "DELETE FROM companies WHERE id = :cid AND NOT EXISTS "
+            "(SELECT 1 FROM users WHERE company_id = :cid)"
+        ), {"cid": company_id})
+        conn.commit()
+
+    # 8. 清除上传的临时文件与内存解析缓存（游客不保留任何使用痕迹）
+    from app.services.cleanup_service import clean_upload_files, clean_memory_cache
+    try:
+        clean_upload_files(0)
+    except Exception:
+        pass
+    try:
+        clean_memory_cache()
+    except Exception:
+        pass
+
+
+@router.post("/guest", response_model=ApiResponse)
+async def guest_login(db: AsyncSession = Depends(get_db)):
+    """游客登录：创建独立的游客账号与游客公司，可体验智能查询/数据管理/智能方案。
+
+    - 游客数据完全隔离在独立的临时公司内，退出登录或会话过期后自动全部清除
+    - 游客无用户管理权限；使用 AI 功能需自行配置 API Key
+    - 游客会话有效期 GUEST_TTL_HOURS 小时，到期由系统自动清理
+    """
+    import uuid
+    from app.models import Company
+    from app.utils.crypto_utils import encrypt_username, hash_username
+
+    # 生成唯一的游客账号与游客公司（避免随机碰撞）
+    guest_name = ""
+    company_name = ""
+    company_pwd = ""
+    for _ in range(5):
+        suffix = uuid.uuid4().hex[:10]
+        candidate_name = f"guest_{suffix}"
+        exists = await db.execute(
+            select(User).where(User.username_hash == hash_username(candidate_name))
+        )
+        if not exists.scalar_one_or_none():
+            guest_name = candidate_name
+            company_name = f"游客_{suffix}"
+            company_pwd = uuid.uuid4().hex[:12]
+            break
+    if not guest_name:
+        return ApiResponse(code=500, message="游客账号创建失败，请稍后重试")
+
+    # 创建游客独立公司（随机公司名 + 随机数据库密码，游客无需记忆）
+    company = Company(
+        company_name=company_name,
+        password_hash=hash_password(company_pwd),
+        created_by=0,
+    )
+    db.add(company)
+    await db.flush()
+
+    # 创建游客用户（角色 guest，会话到期时间）
+    expires_at = datetime.now(timezone(timedelta(hours=8))) + timedelta(hours=GUEST_TTL_HOURS)
+    guest = User(
+        username=encrypt_username(guest_name),
+        username_hash=hash_username(guest_name),
+        password_hash=hash_password(company_pwd),  # 随机密码，游客不通过账号密码登录
+        email="guest@local",
+        role="guest",
+        company_name=company_name,
+        company_id=company.id,
+        expires_at=expires_at,
+    )
+    db.add(guest)
+    await db.flush()
+
+    access_token = create_access_token(data={
+        "sub": str(guest.id),
+        "username": guest.get_plain_username(),
+        "role": guest.role,
+        "company_name": guest.company_name or "",
+    })
+
+    logger.info(f"游客登录: user#{guest.id} 公司#{company.id}「{company_name}」")
+    return ApiResponse(
+        data=LoginResponse(
+            access_token=access_token,
+            token_type="bearer",
+            user=_user_to_response(guest),
+        ).model_dump(),
+        message="游客登录成功（数据为临时体验数据，退出登录后自动清除）",
+    )
+
+
+@router.post("/guest/cleanup", response_model=ApiResponse)
+async def guest_cleanup(
+    current_user: User = Depends(get_current_user),
+):
+    """清除当前游客会话的全部使用痕迹（仅游客可调用）"""
+    if current_user.role != "guest":
+        return ApiResponse(code=403, message="仅游客可执行清除操作")
+
+    _cleanup_guest_session(current_user.id, current_user.company_id or 0)
+    logger.info(f"游客会话已清除: user#{current_user.id} 公司#{current_user.company_id}")
+    return ApiResponse(message="游客数据已全部清除")

@@ -12,6 +12,7 @@ from app.config import CORS_ORIGINS, HOST, PORT, JWT_SECRET_KEY, JWT_SECRET_KEY_
 from app.database import init_db, sync_engine
 from app.routers import products, import_data, query, solutions, auth, invites, column_display, company
 from app.services.cleanup_service import clean_all, FILE_MAX_AGE_HOURS, CLEANUP_INTERVAL_HOURS
+from app.services.company_service import cleanup_orphan_companies, cleanup_expired_guests
 from app.utils.crypto_utils import encrypt_api_key, hash_username
 from sqlalchemy import text
 
@@ -19,13 +20,35 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
 
+def auto_cleanup() -> dict:
+    """自动清理：
+    - 已过期的游客账号及其独立公司、业务数据（游客未主动退出时兜底清除使用痕迹）
+    - 没有任何用户账号的公司及其业务数据
+    返回清理统计。
+    """
+    try:
+        with sync_engine.connect() as conn:
+            expired_guests = cleanup_expired_guests(conn)
+            removed_companies = cleanup_orphan_companies(conn)
+            conn.commit()
+        if expired_guests:
+            logger.info(f"自动清理过期游客 {len(expired_guests)} 个: {expired_guests}")
+        if removed_companies:
+            logger.info(f"自动清理无账号公司 {len(removed_companies)} 家: {', '.join(removed_companies)}")
+        return {"guests": expired_guests, "companies": removed_companies}
+    except Exception as e:
+        logger.warning(f"自动清理跳过: {e}")
+        return {"guests": [], "companies": []}
+
+
 async def periodic_cleanup():
-    """定时清理过期缓存文件"""
+    """定时清理过期缓存文件、过期游客与无账号公司"""
     while True:
         try:
             result = clean_all()
             if result["files_removed"] > 0 or result["cache_entries_removed"] > 0:
                 logger.info(f"缓存清理完成: 文件 {result['files_removed']} 个, 缓存 {result['cache_entries_removed']} 条")
+            auto_cleanup()
         except Exception as e:
             logger.warning(f"缓存清理异常: {e}")
         await asyncio.sleep(CLEANUP_INTERVAL_HOURS * 3600)
@@ -38,6 +61,8 @@ async def lifespan(app: FastAPI):
     if JWT_SECRET_KEY == JWT_SECRET_KEY_DEFAULT:
         logger.warning("当前使用默认 JWT_SECRET_KEY，生产环境请务必通过环境变量 JWT_SECRET_KEY 设置随机密钥（该密钥同时用于用户名/API Key 等敏感信息加密）")
     await init_db()
+    # 启动时自动清理（过期游客、无账号公司；seed 已确保超级管理员公司绑定，不会被误删）
+    auto_cleanup()
     # 初始化最高级管理员的 API Key（仅从环境变量读取；未配置则不写入，避免密钥硬编码在源码中）
     _default_admin_key = os.getenv("ADMIN_API_KEY", "")
     if _default_admin_key:

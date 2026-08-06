@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Input, Space, message, Select, Slider, Typography, Tooltip } from 'antd';
+import { Button, Input, Space, message, Select, Slider, Typography, Tooltip, Alert } from 'antd';
 import { DownloadOutlined, PlusOutlined, ImportOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import ProductTable from '../components/ProductTable';
 import ProductForm from '../components/ProductForm';
@@ -17,8 +17,8 @@ const { Search } = Input;
 const { Text } = Typography;
 
 export default function DataManagePage() {
-    const { isSuperAdmin, isAdmin } = useAuth();
-    const canWrite = isSuperAdmin || isAdmin;  // 是否有增删改权限
+    const { isSuperAdmin, isAdmin, isGuest } = useAuth();
+    const canWrite = isSuperAdmin || isAdmin || isGuest;  // 是否有增删改权限（含游客体验模式）
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(false);
     const [total, setTotal] = useState(0);
@@ -174,6 +174,14 @@ export default function DataManagePage() {
 
     return (
         <div>
+            {isGuest && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message="游客模式：此处导入/新增/编辑的数据均为临时数据，退出登录后自动清除，不会保留任何数据"
+                />
+            )}
             <div className="toolbar">
                 <Search
                     placeholder="搜索快查型号/型号/品牌/产品名称/69码"

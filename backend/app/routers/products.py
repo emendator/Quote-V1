@@ -12,7 +12,7 @@ from app.schemas import (
 )
 from app.services import product_service
 from app.models import User
-from app.utils.auth_utils import require_company, require_company_admin
+from app.utils.auth_utils import require_company, require_company_manager
 from sqlalchemy import func
 
 router = APIRouter(prefix="/api/products", tags=["商品管理"])
@@ -162,10 +162,10 @@ async def get_product(
 @router.post("", response_model=ApiResponse)
 async def create_product(
     data: ProductCreate,
-    current_user: User = Depends(require_company_admin),
+    current_user: User = Depends(require_company_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    """新增商品（仅管理员/最高级管理员可操作）"""
+    """新增商品（管理员/最高级管理员/游客可操作，数据隔离在本公司）"""
     product = await product_service.create_product(db, data.model_dump(by_alias=True), company_id=current_user.company_id, company_name=current_user.company_name)
     return ApiResponse(data=ProductResponse.model_validate(product).model_dump(), message="新增成功")
 
@@ -174,10 +174,10 @@ async def create_product(
 async def update_product(
     product_id: int,
     data: ProductUpdate,
-    current_user: User = Depends(require_company_admin),
+    current_user: User = Depends(require_company_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    """编辑商品（仅管理员/最高级管理员可操作）"""
+    """编辑商品（管理员/最高级管理员/游客可操作，数据隔离在本公司）"""
     update_data = data.model_dump(exclude_none=True, by_alias=True)
     product = await product_service.update_product(db, product_id, update_data, company_id=current_user.company_id)
     if not product:
@@ -188,10 +188,10 @@ async def update_product(
 @router.delete("/{product_id}", response_model=ApiResponse)
 async def delete_product(
     product_id: int,
-    current_user: User = Depends(require_company_admin),
+    current_user: User = Depends(require_company_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    """删除商品（仅管理员/最高级管理员可操作）"""
+    """删除商品（管理员/最高级管理员/游客可操作，数据隔离在本公司）"""
     success = await product_service.delete_product(db, product_id, company_id=current_user.company_id)
     if not success:
         return ApiResponse(code=404, message="商品不存在")
@@ -201,10 +201,10 @@ async def delete_product(
 @router.post("/batch/delete", response_model=ApiResponse)
 async def batch_delete(
     data: BatchDeleteRequest,
-    current_user: User = Depends(require_company_admin),
+    current_user: User = Depends(require_company_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    """批量删除商品（仅管理员/最高级管理员可操作）"""
+    """批量删除商品（管理员/最高级管理员/游客可操作，数据隔离在本公司）"""
     count = await product_service.batch_delete_products(db, data.ids, company_id=current_user.company_id)
     return ApiResponse(data={"deleted": count}, message=f"成功删除 {count} 个商品")
 

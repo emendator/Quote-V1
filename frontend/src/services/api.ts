@@ -300,6 +300,17 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
     return res.data;
 }
 
+/** 游客登录：创建独立临时账号+公司，退出后自动清除全部数据 */
+export async function guestLogin(): Promise<LoginResponse> {
+    const res = await api.post<unknown, ApiResponse<LoginResponse>>('/auth/guest');
+    return res.data;
+}
+
+/** 清除当前游客会话的全部使用痕迹（仅游客可调用） */
+export async function guestCleanup(): Promise<void> {
+    await api.post('/auth/guest/cleanup');
+}
+
 export async function register(data: RegisterRequest): Promise<LoginResponse> {
     const res = await api.post<unknown, ApiResponse<LoginResponse>>('/auth/register', data);
     return res.data;

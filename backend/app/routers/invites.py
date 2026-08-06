@@ -296,6 +296,12 @@ async def delete_invite(
                 # 级联删除使用者及其所有下游（复用当前连接，避免锁冲突）
                 _cascade_delete_user(used_by, conn)
 
+            # 删除账号后：若该公司已无任何注册账号，自动删除该公司（公司名+密码）及其全部业务数据
+            from app.services.company_service import cleanup_orphan_companies
+            removed = cleanup_orphan_companies(conn)
+            if removed:
+                logger.info(f"删除账号后自动清理无账号公司: {', '.join(removed)}")
+
             conn.commit()
 
         return ApiResponse(message="邀请码及关联数据已全部删除")

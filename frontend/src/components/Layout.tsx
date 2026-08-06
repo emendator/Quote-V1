@@ -36,7 +36,7 @@ function getCartCount(): number {
 export default function AppLayout() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user, logout, isSuperAdmin, isAdmin, refreshUser } = useAuth();
+    const { user, logout, isSuperAdmin, isAdmin, isGuest, refreshUser } = useAuth();
     const [cartCount, setCartCount] = useState(getCartCount);
     const [pwdModalOpen, setPwdModalOpen] = useState(false);
 
@@ -60,7 +60,8 @@ export default function AppLayout() {
     // 账号过期提醒
     const expiresAt = user?.expires_at ? new Date(user.expires_at) : null;
     const daysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
-    const showExpiryWarning = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
+    // 游客不显示账号过期告警（游客会话本身是临时的，随时可重新进入）
+    const showExpiryWarning = !isGuest && daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
     const expiresAtString = expiresAt ? expiresAt.toLocaleString() : '';
 
     useEffect(() => {
@@ -69,15 +70,29 @@ export default function AppLayout() {
         return () => window.removeEventListener('solutionCartChange', handler);
     }, []);
 
-    // 检查是否需完善公司信息（绑定公司名称 + 公司数据库密码）
+    // 检查是否需完善公司信息（绑定公司名称 + 公司数据库密码）；游客拥有独立临时公司，无需绑定
     useEffect(() => {
-        if (user && !user.company_id) {
+        if (user && !user.company_id && !isGuest) {
             navigate('/company-info', { replace: true });
         }
-    }, [user, navigate]);
+    }, [user, navigate, isGuest]);
 
-    const handleLogout = () => {
-        logout();
+    const handleLogout = async () => {
+        // 游客退出登录会自动清除服务端全部临时数据（不保留任何使用痕迹），先确认再执行
+        if (isGuest) {
+            Modal.confirm({
+                title: '退出游客模式',
+                content: '退出后当前游客会话的全部数据将被清除且无法恢复（游客模式不保留任何数据）。确定退出吗？',
+                okText: '确认退出',
+                cancelText: '取消',
+                onOk: async () => {
+                    await logout();
+                    navigate('/login', { replace: true });
+                },
+            });
+            return;
+        }
+        await logout();
         navigate('/login', { replace: true });
     };
 
@@ -128,8 +143,8 @@ export default function AppLayout() {
         }
     };
 
-    const roleLabel = isSuperAdmin ? '最高级管理员' : isAdmin ? '管理员' : '用户';
-    const roleColor = isSuperAdmin ? 'red' : isAdmin ? 'blue' : 'green';
+    const roleLabel = isSuperAdmin ? '最高级管理员' : isAdmin ? '管理员' : isGuest ? '游客' : '用户';
+    const roleColor = isSuperAdmin ? 'red' : isAdmin ? 'blue' : isGuest ? 'purple' : 'green';
 
     const userMenuItems = [
         {
@@ -143,12 +158,14 @@ export default function AppLayout() {
             disabled: true,
         },
         { type: 'divider' as const },
-        {
-            key: 'company',
-            icon: <SettingOutlined />,
-            label: '修改公司信息',
-            onClick: () => navigate('/company-info?edit=1'),
-        },
+        ...(isGuest ? [] : [
+            {
+                key: 'company',
+                icon: <SettingOutlined />,
+                label: '修改公司信息',
+                onClick: () => navigate('/company-info?edit=1'),
+            },
+        ]),
         {
             key: 'apikey',
             icon: <ApiOutlined />,
@@ -163,12 +180,14 @@ export default function AppLayout() {
             ),
             onClick: () => setApiKeyModalOpen(true),
         },
-        {
-            key: 'password',
-            icon: <LockOutlined />,
-            label: '修改密码',
-            onClick: () => setPwdModalOpen(true),
-        },
+        ...(isGuest ? [] : [
+            {
+                key: 'password',
+                icon: <LockOutlined />,
+                label: '修改密码',
+                onClick: () => setPwdModalOpen(true),
+            },
+        ]),
         ...(isSuperAdmin || isAdmin ? [
             {
                 key: 'company-pwd',
@@ -286,6 +305,18 @@ export default function AppLayout() {
                     </Dropdown>
                 </Header>
                 <Content style={{ padding: 24, overflow: 'auto' }}>
+                    {isGuest && (
+                        <Alert
+                            type="info"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message={
+                                <span>
+                                    🧪 <Text strong>游客模式</Text>：当前所有数据均为临时体验数据，<Text strong>不会保留任何数据</Text>，退出登录后自动清除全部使用痕迹；使用 AI 功能需在个人菜单中配置 API Key
+                                </span>
+                            }
+                        />
+                    )}
                     {showExpiryWarning && (
                         <Alert
                             type="warning"

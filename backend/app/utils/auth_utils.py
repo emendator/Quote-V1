@@ -146,3 +146,21 @@ async def require_company_admin(current_user: User = Depends(require_company)) -
     if current_user.role not in ("super_admin", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足，需要管理员及以上权限")
     return current_user
+
+
+async def require_company_manager(current_user: User = Depends(get_current_user)) -> User:
+    """限制「可管理本公司数据」的角色：管理员/最高级管理员/游客。
+
+    - 游客（guest）：拥有独立临时公司，可体验数据管理（增删改、导入）
+    - 普通 user：仅可查看，不可管理数据
+    """
+    if current_user.role == "guest":
+        return current_user
+    if current_user.role not in ("super_admin", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足，需要管理员及以上权限")
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="请先完善公司信息（公司名称 + 公司数据库密码）",
+        )
+    return current_user

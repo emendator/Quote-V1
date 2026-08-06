@@ -79,3 +79,29 @@ async def change_db_password(
     if not ok:
         return ApiResponse(code=400, message="公司数据库密码错误，或无权限修改该公司")
     return ApiResponse(message="公司数据库密码修改成功")
+
+
+@router.post("/cleanup-orphans", response_model=ApiResponse)
+async def cleanup_orphan_companies_api(
+    current_user: User = Depends(require_company_admin),
+):
+    """手动清理「没有任何用户账号」的公司（公司名+密码）及其全部业务数据。
+
+    仅最高级管理员可执行；系统也会在启动、定时任务及删除账号后自动清理。
+    """
+    if current_user.role != "super_admin":
+        return ApiResponse(code=403, message="仅最高级管理员可执行此操作")
+
+    from app.database import sync_engine
+    from app.services.company_service import cleanup_orphan_companies
+
+    with sync_engine.connect() as conn:
+        removed = cleanup_orphan_companies(conn)
+        conn.commit()
+
+    if removed:
+        logger.info(f"手动清理无账号公司 {len(removed)} 家: {', '.join(removed)}（操作人 user#{current_user.id}）")
+    return ApiResponse(
+        data={"removed": removed},
+        message="已清理 " + ", ".join(removed) if removed else "没有需要清理的无账号公司",
+    )

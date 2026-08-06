@@ -156,7 +156,7 @@ export interface ImportResult {
 
 // ========== 用户认证相关 ==========
 
-export type UserRole = 'super_admin' | 'admin' | 'user';
+export type UserRole = 'super_admin' | 'admin' | 'user' | 'guest';
 
 export interface User {
     id: number;
