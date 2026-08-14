@@ -5,7 +5,39 @@ import { useAuth } from '../store/AuthContext';
 import { getInviteCodes, createInviteCode, deleteInviteCode, renewInviteCode } from '../services/api';
 import type { InviteCode } from '../types';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
+
+/** 复制文本到剪贴板：优先 Clipboard API，回退到 execCommand（兼容 http 等非安全上下文） */
+async function copyText(text: string): Promise<boolean> {
+    // 1) 优先使用 Clipboard API（仅在 https / localhost 等安全上下文可用）
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            // 被拒绝或失败时继续走回退方案
+        }
+    }
+    // 2) 回退：临时 textarea + execCommand('copy')，http 环境下同样可用
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        textarea.style.left = '-9999px';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        textarea.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return ok;
+    } catch {
+        return false;
+    }
+}
 
 const InviteCodePage: React.FC = () => {
     const { isSuperAdmin } = useAuth();
@@ -53,12 +85,9 @@ const InviteCodePage: React.FC = () => {
             message.success('邀请码创建成功');
             setModalOpen(false);
             form.resetFields();
-            // 复制到剪贴板
-            try {
-                await navigator.clipboard.writeText(result.code);
+            // 复制到剪贴板（兼容 http 等非安全上下文）
+            if (await copyText(result.code)) {
                 message.success('邀请码已复制到剪贴板');
-            } catch {
-                // 部分浏览器可能不支持
             }
             fetchData();
         } catch (err: any) {
@@ -128,10 +157,9 @@ const InviteCodePage: React.FC = () => {
         setRenewModalOpen(true);
     };
     const copyToClipboard = async (code: string) => {
-        try {
-            await navigator.clipboard.writeText(code);
+        if (await copyText(code)) {
             message.success('已复制到剪贴板');
-        } catch {
+        } else {
             message.error('复制失败，请手动复制');
         }
     };
@@ -269,10 +297,10 @@ const InviteCodePage: React.FC = () => {
     }
 
     return (
-        <div style={{ padding: 24 }}>
+        <div className="dd-module dd-d1">
             <Card>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Title level={4} style={{ margin: 0 }}>用户管理</Title>
+                    <span className="eyebrow">Invite & Members</span>
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
                         创建邀请码
                     </Button>

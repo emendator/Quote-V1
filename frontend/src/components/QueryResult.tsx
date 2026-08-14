@@ -4,11 +4,27 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Product, ParsedQuery, SmartQueryResult, BatchModelQueryResult, BatchModelQueryItem, ColumnConfigItem } from '../types';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getColumnDisplayConfig } from '../services/api';
+import { useCountUp } from '../hooks/useCountUp';
 
 const { Text, Title } = Typography;
 
+// 数字滚动文本
+function CountUpText({ value }: { value: number }) {
+    const v = useCountUp(value);
+    return <>{Math.round(v)}</>;
+}
+
 // ========== 方案购物车（localStorage 持久化） ==========
 const SOLUTION_CART_KEY = 'solution_cart';
+
+// 编辑部式空状态
+const renderEmpty = (title: string, desc?: string) => (
+    <div className="dd-empty">
+        <div className="dd-empty-mark">◇</div>
+        <div className="dd-empty-title">{title}</div>
+        {desc && <div className="dd-empty-desc">{desc}</div>}
+    </div>
+);
 
 function getSolutionCart(): Map<number, number> {
     try {
@@ -98,7 +114,7 @@ const dateSort = (a: string | null | undefined, b: string | null | undefined): n
 const batchColumns: ColumnsType<Product> = [
     { title: '图片', dataIndex: 'image', key: 'image', width: 55, render: (v) => renderImage(v) },
     { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: true, render: (v) => <Text strong>{v || '-'}</Text> },
-    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
+    { title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '品牌', dataIndex: 'brand', key: 'brand', width: 55, render: (v) => v || '-' },
     { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '报价更新', dataIndex: 'price_update', key: 'price_update', width: 95, sorter: (a, b) => dateSort(a.price_update, b.price_update), render: (v) => fmtDate(v) },
@@ -122,7 +138,7 @@ const batchColumns: ColumnsType<Product> = [
 const columns: ColumnsType<Product> = [
     { title: '图片', dataIndex: 'image', key: 'image', width: 55, render: (v) => renderImage(v) },
     { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 115, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
-    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 125, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
+    { title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 125, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) },
     { title: '品牌', dataIndex: 'brand', key: 'brand', width: 55, render: (v) => v || '-' },
     { title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 75, render: (v) => v || '-' },
@@ -256,11 +272,9 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
     if (batchMode && result && 'total_queries' in result) {
         const batchResult = result as BatchModelQueryResult;
         if (batchResult.total_queries === 0) {
-            return (
-                <Empty
-                    description="未找到匹配的商品，请检查输入的快查型号"
-                    style={{ marginTop: 60 }}
-                />
+            return renderEmpty(
+                '暂无匹配结果',
+                '请检查快查型号是否输入正确，或换一个关键词试试'
             );
         }
 
@@ -333,8 +347,8 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                     icon={<OrderedListOutlined />}
                     message={
                         <Text>
-                            批量查询完成：共查询 <Text strong>{batchResult.total_queries}</Text> 个快查型号，
-                            找到 <Text strong>{batchResult.total_results}</Text> 条结果
+                            批量查询完成：共查询 <Text strong><CountUpText value={batchResult.total_queries} /></Text> 个快查型号，
+                            找到 <Text strong><CountUpText value={batchResult.total_results} /></Text> 条结果
                         </Text>
                     }
                     style={{ marginBottom: 16 }}
@@ -369,11 +383,9 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
 
     // ========== 智能查询结果 ==========
     if (!result) {
-        return (
-            <Empty
-                description="输入查询条件后点击「智能查询」获取报价"
-                style={{ marginTop: 60 }}
-            />
+        return renderEmpty(
+            '开始一次智能查询',
+            '输入查询条件后点击「智能查询」获取报价，例如：飞利浦充电宝 100 块以下'
         );
     }
 
@@ -403,7 +415,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
             <div className="result-section">
                 {aiBanner}
                 <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
-                    联合 {smartResult.parsed_queries.length} 个条件，共 {smartResult.result_count} 条结果
+                    联合 {smartResult.parsed_queries.length} 个条件，共 <CountUpText value={smartResult.result_count} /> 条结果
                 </Text>
                 <Card
                     className="result-card"
@@ -430,7 +442,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                             rowSelection={rowSelection}
                         />
                     ) : (
-                        <Empty description="未找到同时满足所有条件的商品" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                        <Empty description="未找到同时满足所有条件的商品，试试减少筛选条件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                     )}
                 </Card>
             </div>
@@ -443,8 +455,9 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
             <div className="result-section">
                 {aiBanner}
                 <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
-                    共识别到 {smartResult.parsed_queries.length} 个查询条件，共 {smartResult.result_count} 条结果
+                    共识别到 <CountUpText value={smartResult.parsed_queries.length} /> 个查询条件，共 <CountUpText value={smartResult.result_count} /> 条结果
                 </Text>
+                <div className="dd-stagger">
                 {smartResult.parsed_queries.map((pq: ParsedQuery, idx: number) => {
                     const isExpanded = !collapsed.has(idx);
                     return (
@@ -487,6 +500,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                         </Card>
                     );
                 })}
+                </div>
             </div>
         );
     }
@@ -501,7 +515,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                     <Space>
                         <Tag color="green">{smartResult.query_intent}</Tag>
                         <Text>{smartResult.message}</Text>
-                        <Tag>共 {smartResult.result_count} 条</Tag>
+                        <Tag>共 <CountUpText value={smartResult.result_count} /> 条</Tag>
                     </Space>
                 }
             >
@@ -521,7 +535,7 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
                         rowSelection={rowSelection}
                     />
                 ) : (
-                    <Empty description="未找到匹配的商品" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    <Empty description="未找到匹配的商品，试试简化关键词或调整筛选条件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 )}
             </Card>
         </div>

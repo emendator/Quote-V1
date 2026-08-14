@@ -252,7 +252,7 @@ export default function ColumnDisplayConfig({ open, pageType, title, onClose, on
 
     return (
         <Modal
-            title={title || `列显示配置 - ${pageType === 'product_db' ? '产品库' : pageType === 'query_result' ? '智能查询结果' : '批量查询结果'}`}
+            title={title || `列显示配置 - ${pageType === 'product_db' ? '商品库' : pageType === 'query_result' ? '智能查询结果' : '批量查询结果'}`}
             open={open}
             onCancel={onClose}
             width={900}

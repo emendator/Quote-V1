@@ -178,13 +178,14 @@ export default function DataManagePage() {
                 <Alert
                     type="warning"
                     showIcon
+                    className="dd-module dd-d1"
                     style={{ marginBottom: 16 }}
-                    message="游客模式：此处导入/新增/编辑的数据均为临时数据，退出登录后自动清除，不会保留任何数据"
+                    message="游客模式：导入和新增的商品均为临时数据，退出登录后自动清除"
                 />
             )}
-            <div className="toolbar">
+            <div className="toolbar dd-module dd-d2">
                 <Search
-                    placeholder="搜索快查型号/型号/品牌/产品名称/69码"
+                    placeholder="搜索快查型号/型号/品牌/商品名称/69码"
                     allowClear
                     onSearch={handleSearch}
                     style={{ width: 280 }}
@@ -232,7 +233,7 @@ export default function DataManagePage() {
                     <Button icon={<DownloadOutlined />} onClick={handleExport}>
                         导出数据
                     </Button>
-                    <Tooltip title="配置产品库表格的列显示和表头名称（管理员以上可配置）">
+                    <Tooltip title="配置商品表格的列显示和表头名称（管理员以上可配置）">
                         <Button
                             icon={<ColumnHeightOutlined />}
                             onClick={() => setColumnConfigOpen(true)}
@@ -246,7 +247,7 @@ export default function DataManagePage() {
                             <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
                                 导入数据
                             </Button>
-                            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+                            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} className="dd-shimmer">
                                 新增商品
                             </Button>
                         </>
@@ -254,35 +255,37 @@ export default function DataManagePage() {
                 </Space>
             </div>
 
-            <ProductTable
-                dataSource={products}
-                loading={loading}
-                total={total}
-                page={page}
-                pageSize={pageSize}
-                selectedRowKeys={selectedKeys}
-                zoom={zoom}
-                sortBy={sortBy}
-                sortOrder={sortOrder}
-                columnFilters={columnFilters}
-                onColumnFilter={(filters) => {
-                    setColumnFilters(filters);
-                    updateState({ page: 1 });  // 筛选后回到第一页
-                }}
-                canWrite={canWrite}
-                columnConfig={columnConfig}
-                filterOptions={filterOptions}
-                onPageChange={(p, ps) => {
-                    updateState({ page: p, pageSize: ps });
-                }}
-                onSortChange={(field, order) => {
-                    updateState({ sortBy: field, sortOrder: order, page: 1 });
-                }}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onBatchDelete={handleBatchDelete}
-                onSelectChange={setSelectedKeys}
-            />
+            <div className="dd-module dd-d3">
+                <ProductTable
+                    dataSource={products}
+                    loading={loading}
+                    total={total}
+                    page={page}
+                    pageSize={pageSize}
+                    selectedRowKeys={selectedKeys}
+                    zoom={zoom}
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    columnFilters={columnFilters}
+                    onColumnFilter={(filters) => {
+                        setColumnFilters(filters);
+                        updateState({ page: 1 });  // 筛选后回到第一页
+                    }}
+                    canWrite={canWrite}
+                    columnConfig={columnConfig}
+                    filterOptions={filterOptions}
+                    onPageChange={(p, ps) => {
+                        updateState({ page: p, pageSize: ps });
+                    }}
+                    onSortChange={(field, order) => {
+                        updateState({ sortBy: field, sortOrder: order, page: 1 });
+                    }}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onBatchDelete={handleBatchDelete}
+                    onSelectChange={setSelectedKeys}
+                />
+            </div>
 
             {canWrite && (
                 <>
@@ -303,7 +306,7 @@ export default function DataManagePage() {
             <ColumnDisplayConfig
                 open={columnConfigOpen}
                 pageType="product_db"
-                title="产品库列显示配置"
+                title="商品列显示配置"
                 onClose={() => setColumnConfigOpen(false)}
                 onSaved={() => {
                     loadData();

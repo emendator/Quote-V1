@@ -4,7 +4,7 @@ const DB_FIELDS = [
     { value: '', label: '— 不导入 —' },
     { value: 'quick_model', label: '快查型号 *' },
     { value: 'product_model', label: '型号' },
-    { value: 'product_name', label: '产品名称' },
+    { value: 'product_name', label: '商品名称' },
     { value: 'brand', label: '品牌' },
     { value: 'category_level1', label: '一级品类' },
     { value: 'category_level2', label: '二级品类' },
@@ -83,8 +83,8 @@ export default function ColumnMapping({ columns, mapping, onChange }: Props) {
 
     return (
         <div className="mapping-container">
-            <p style={{ marginBottom: 12, color: '#666' }}>
-                请为每个 Excel 列选择对应的数据库字段。标记 <span style={{ color: '#ff4d4f' }}>*</span> 的字段为必填。
+            <p style={{ marginBottom: 12, color: 'var(--ink-500)' }}>
+                请为每个 Excel 列选择对应的数据库字段。标记 <span style={{ color: 'var(--accent-red)' }}>*</span> 的字段为必填。
             </p>
             <Table
                 columns={tableColumns}

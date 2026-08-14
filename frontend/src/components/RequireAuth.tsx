@@ -15,8 +15,13 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children, roles }) => {
 
     if (loading) {
         return (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <Spin size="large" tip="加载中..." />
+            <div style={{
+                display: 'flex', justifyContent: 'center', alignItems: 'center',
+                height: '100vh', background: 'var(--paper)', flexDirection: 'column', gap: 20,
+            }}>
+                <div className="dd-brand-mark dd-float" style={{ width: 46, height: 46, borderRadius: 14, fontSize: 22, marginBottom: 0 }}>¥</div>
+                <Spin size="large" />
+                <div style={{ color: 'var(--ink-400)', fontSize: 13, letterSpacing: '0.08em' }}>正在加载工作台…</div>
             </div>
         );
     }

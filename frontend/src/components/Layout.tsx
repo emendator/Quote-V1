@@ -17,12 +17,13 @@ import {
     CloseCircleOutlined,
     ThunderboltOutlined,
     SafetyOutlined,
+    DownOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../store/AuthContext';
 import { changePassword, updateApiKey, changeCompanyPassword } from '../services/api';
 
 const { Header, Sider, Content } = Layout;
-const { Title, Text, Paragraph } = Typography;
+const { Text, Paragraph } = Typography;
 
 // 计算购物车中的商品数量
 function getCartCount(): number {
@@ -32,6 +33,14 @@ function getCartCount(): number {
         return JSON.parse(raw).length;
     } catch { return 0; }
 }
+
+// 页面标题 + 眉标（编辑部式：英文眉标 + 衬线标题）
+const PAGE_META: Record<string, { eyebrow: string; title: string }> = {
+    '/': { eyebrow: 'Smart Query', title: '智能查询' },
+    '/data': { eyebrow: 'Product Library', title: '商品管理' },
+    '/solutions': { eyebrow: 'Solution Studio', title: '智能方案' },
+    '/invite-codes': { eyebrow: 'Access Control', title: '用户管理' },
+};
 
 export default function AppLayout() {
     const navigate = useNavigate();
@@ -82,7 +91,7 @@ export default function AppLayout() {
         if (isGuest) {
             Modal.confirm({
                 title: '退出游客模式',
-                content: '退出后当前游客会话的全部数据将被清除且无法恢复（游客模式不保留任何数据）。确定退出吗？',
+                content: '退出后，当前游客会话的数据将全部清除且无法恢复。确定退出吗？',
                 okText: '确认退出',
                 cancelText: '取消',
                 onOk: async () => {
@@ -162,7 +171,7 @@ export default function AppLayout() {
             {
                 key: 'company',
                 icon: <SettingOutlined />,
-                label: '修改公司信息',
+                label: '公司信息',
                 onClick: () => navigate('/company-info?edit=1'),
             },
         ]),
@@ -206,53 +215,49 @@ export default function AppLayout() {
 
     const menuItems = [
         { key: '/', icon: <SearchOutlined />, label: '智能查询' },
-        { key: '/data', icon: <DatabaseOutlined />, label: '数据管理' },
+        { key: '/data', icon: <DatabaseOutlined />, label: '商品管理' },
         {
             key: '/solutions', icon: <BulbOutlined />,
-            label: cartCount > 0 ? <span>智能方案 <Badge count={cartCount} size="small" style={{ marginLeft: 4 }} /></span> : '智能方案',
+            label: cartCount > 0
+                ? <span>智能方案 <Badge key={cartCount} count={cartCount} size="small" className="dd-badge-pop" style={{ marginLeft: 4, backgroundColor: 'var(--accent-amber)' }} /></span>
+                : '智能方案',
         },
         ...(isSuperAdmin || isAdmin ? [
             { key: '/invite-codes', icon: <KeyOutlined />, label: '用户管理' },
         ] : []),
     ];
 
-    const pageTitles: Record<string, string> = {
-        '/': '🔍 智能报价查询',
-        '/data': '📋 商品数据管理',
-        '/solutions': '💡 智能方案',
-        '/invite-codes': '用户管理',
-    };
+    const pageMeta = PAGE_META[location.pathname] || { eyebrow: 'Workspace', title: '智能报价系统' };
 
     return (
         <Layout style={{ minHeight: '100vh' }}>
             <Sider
-                width={200}
-                style={{ background: '#fff' }}
+                width={216}
+                className={siderCollapsed ? 'dd-sider dd-sider-collapsed' : 'dd-sider'}
+                style={{ background: '#fff', borderRight: '1px solid var(--ink-100)' }}
                 collapsible
                 collapsed={siderCollapsed}
                 onCollapse={(value) => {
                     setSiderCollapsed(value);
                     localStorage.setItem('sider_collapsed', String(value));
                 }}
-                collapsedWidth={48}
+                collapsedWidth={64}
                 trigger={null}
             >
-                <div style={{
-                    padding: siderCollapsed ? '20px 0' : '20px 16px',
-                    textAlign: 'center',
-                    overflow: 'hidden',
-                    whiteSpace: 'nowrap',
-                }}>
-                    <Title level={5} style={{ margin: 0, color: '#1677ff', fontSize: siderCollapsed ? 14 : undefined }}>
-                        {siderCollapsed ? '💰' : '💰 智能报价'}
-                    </Title>
+                <div className="dd-brand">
+                    <div className="dd-brand-mark dd-float">¥</div>
+                    {!siderCollapsed && (
+                        <>
+                            <div className="dd-brand-name">智能报价</div>
+                            <div className="dd-brand-tagline">Quotation Studio</div>
+                        </>
+                    )}
                 </div>
                 <Menu
                     mode="inline"
                     selectedKeys={[location.pathname]}
                     items={menuItems}
                     onClick={({ key }) => navigate(key)}
-                    style={{ borderRight: 0 }}
                     inlineCollapsed={siderCollapsed}
                 />
                 {/* 折叠/展开按钮固定在底部 */}
@@ -271,40 +276,43 @@ export default function AppLayout() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         cursor: 'pointer',
-                        borderTop: '1px solid #f0f0f0',
-                        color: '#8c8c8c',
-                        fontSize: 16,
+                        borderTop: '1px solid var(--ink-100)',
+                        color: 'var(--ink-400)',
+                        fontSize: 15,
                         transition: 'all 0.2s',
                         background: '#fff',
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = '#1677ff'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = '#8c8c8c'; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--ink-900)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ink-400)'; }}
                 >
                     {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
                 </div>
             </Sider>
             <Layout>
-                <Header style={{
-                    background: '#fff',
-                    padding: '0 24px',
-                    borderBottom: '1px solid #f0f0f0',
+                <Header className="dd-header" style={{
+                    padding: '0 28px',
+                    borderBottom: '1px solid var(--ink-100)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     height: 64,
                 }}>
-                    <Title level={4} style={{ margin: 0, lineHeight: '64px' }}>
-                        {pageTitles[location.pathname] || '智能报价系统'}
-                    </Title>
+                    <div key={location.pathname} className="dd-page-title">
+                        <span className="eyebrow dd-title-stagger">{pageMeta.eyebrow}</span>
+                        <h2 className="dd-title-stagger" style={{ animationDelay: '0.07s' }}>{pageMeta.title}</h2>
+                    </div>
                     <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-                        <Space style={{ cursor: 'pointer' }}>
-                            <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
-                            <span>{user?.username}</span>
-                            <Tag color={roleColor} style={{ fontSize: 11, lineHeight: '18px', padding: '0 6px', margin: 0 }}>{roleLabel}</Tag>
+                        <Space className="dd-user-chip">
+                            <Avatar icon={<UserOutlined />} size={30} style={{ backgroundColor: 'var(--ink-800)' }} />
+                            <span style={{ fontWeight: 550, fontSize: 13.5, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {user?.username}
+                            </span>
+                            <Tag color={roleColor} style={{ fontSize: 11, lineHeight: '18px', padding: '0 7px', margin: 0, borderRadius: 999 }}>{roleLabel}</Tag>
+                            <DownOutlined style={{ fontSize: 10, color: 'var(--ink-400)' }} />
                         </Space>
                     </Dropdown>
                 </Header>
-                <Content style={{ padding: 24, overflow: 'auto' }}>
+                <Content key={location.pathname} className="dd-content" style={{ overflow: 'auto' }}>
                     {isGuest && (
                         <Alert
                             type="info"
@@ -312,7 +320,7 @@ export default function AppLayout() {
                             style={{ marginBottom: 16 }}
                             message={
                                 <span>
-                                    🧪 <Text strong>游客模式</Text>：当前所有数据均为临时体验数据，<Text strong>不会保留任何数据</Text>，退出登录后自动清除全部使用痕迹；使用 AI 功能需在个人菜单中配置 API Key
+                                    🧪 <Text strong>游客模式</Text>：所有数据均为临时体验数据，退出后自动清除；使用 AI 功能需先在个人菜单配置 API Key
                                 </span>
                             }
                         />
@@ -397,7 +405,7 @@ export default function AppLayout() {
             >
                 <Alert
                     message="需要 DeepSeek API Key"
-                    description="本系统的 AI 智能查询和智能方案功能需要 DeepSeek API Key 才能使用。请前往 platform.deepseek.com 获取您的 API Key，注意以 sk- 开头。"
+                    description="AI 智能查询与智能方案需要 DeepSeek API Key。请前往 platform.deepseek.com 获取，Key 以 sk- 开头。"
                     type="info"
                     showIcon
                     style={{ marginBottom: 20 }}
@@ -413,7 +421,7 @@ export default function AppLayout() {
                             )}
                         </Descriptions.Item>
                         <Descriptions.Item label="累计 Token 消耗">
-                            <Text><ThunderboltOutlined /> {(user?.total_tokens_used ?? 0).toLocaleString()} Tokens</Text>
+                            <Text><ThunderboltOutlined /> <span className="mono">{(user?.total_tokens_used ?? 0).toLocaleString()}</span> Tokens</Text>
                         </Descriptions.Item>
                     </Descriptions>
                 </Card>

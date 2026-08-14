@@ -39,7 +39,7 @@ interface Props {
 const FILTERABLE_COLUMNS: { key: string; label: string }[] = [
     { key: 'quick_model', label: '快查型号' },
     { key: 'product_model', label: '型号' },
-    { key: 'product_name', label: '产品名称' },
+    { key: 'product_name', label: '商品名称' },
     { key: 'brand', label: '品牌' },
     { key: 'category_level1', label: '一级品类' },
     { key: 'category_level2', label: '二级品类' },
@@ -259,7 +259,7 @@ export default function ProductTable({
     // 根据列显示配置过滤/调整列定义
     const columns = useMemo(() => {
         const allColumns: ColumnsType<Product> = [
-            { title: '序号', key: 'index', width: 56, render: (_, __, index) => (page - 1) * pageSize + index + 1 },
+            { title: '序号', key: 'index', width: 56, render: (_, __, index) => <span className="dd-index">{(page - 1) * pageSize + index + 1}</span> },
             makeFilterableColumn({ title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 160, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) }, 'quick_model'),
             makeFilterableColumn({ title: '型号', dataIndex: 'product_model', key: 'product_model', width: 130, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) }, 'product_model'),
             {
@@ -279,7 +279,7 @@ export default function ProductTable({
                     );
                 },
             },
-            makeFilterableColumn({ title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) }, 'product_name'),
+            makeFilterableColumn({ title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 160, ellipsis: { showTitle: false }, render: (v) => renderEllipsis(v) }, 'product_name'),
             makeFilterableColumn({ title: '品牌', dataIndex: 'brand', key: 'brand', width: 70, render: (v) => v || '-' }, 'brand'),
             makeFilterableColumn({ title: '一级品类', dataIndex: 'category_level1', key: 'category_level1', width: 80, render: (v) => v || '-' }, 'category_level1'),
             makeFilterableColumn({ title: '二级品类', dataIndex: 'category_level2', key: 'category_level2', width: 80, render: (v) => v || '-' }, 'category_level2'),
@@ -328,7 +328,7 @@ export default function ProductTable({
                         <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onEdit(record)}>
                             编辑
                         </Button>
-                        <Popconfirm title="确认删除此商品？" onConfirm={() => onDelete(record.id)} okText="确认" cancelText="取消">
+                        <Popconfirm title={`删除「${record.quick_model || record.product_name || record.id}」？`} description="删除后无法恢复" onConfirm={() => onDelete(record.id)} okText="删除" cancelText="取消">
                             <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                                 删除
                             </Button>
@@ -370,14 +370,15 @@ export default function ProductTable({
     return (
         <div>
             {canWrite && selectedRowKeys.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
+                <div className="dd-fade-in" style={{ marginBottom: 12 }}>
                     <Popconfirm
-                        title={`确认删除选中的 ${selectedRowKeys.length} 个商品？`}
+                        title={`删除选中的 ${selectedRowKeys.length} 个商品？`}
+                        description="删除后无法恢复"
                         onConfirm={onBatchDelete}
-                        okText="确认"
+                        okText="删除"
                         cancelText="取消"
                     >
-                        <Button danger>批量删除 ({selectedRowKeys.length})</Button>
+                        <Button danger>删除所选 ({selectedRowKeys.length})</Button>
                     </Popconfirm>
                 </div>
             )}

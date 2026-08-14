@@ -160,7 +160,7 @@ export default function HomePage() {
                 if (data.total_results > 0) {
                     message.success(`批量查询完成，共找到 ${data.total_results} 条结果`);
                 } else {
-                    message.info('未找到匹配的商品');
+                    message.info('未找到匹配的商品，请检查快查型号是否正确');
                 }
             } else {
                 const queryText_ = buildQueryText(finalText);
@@ -256,7 +256,7 @@ export default function HomePage() {
     // 导出查询结果到 Excel（调用后端 API 以正确嵌入图片）
     const handleExport = useCallback(async () => {
         if (!result) {
-            message.warning('没有可导出的数据');
+            message.warning('当前没有可导出的商品，请先完成查询');
             return;
         }
 
@@ -279,11 +279,11 @@ export default function HomePage() {
             const selectedSet = new Set(selectedRowKeys);
             products = allProducts.filter(p => selectedSet.has(p.id));
             if (products.length === 0) {
-                message.warning('勾选的商品中没有找到可导出的数据');
+                message.warning('勾选的商品中没有可导出的数据，请重新勾选');
                 return;
             }
         } else {
-            message.warning('请先勾选要导出的商品（在表格左侧勾选）');
+            message.warning('请先勾选要导出的商品（点击表格左侧复选框）');
             return;
         }
 
@@ -314,19 +314,21 @@ export default function HomePage() {
 
     return (
         <div style={{ margin: '0 auto', padding: '0 8px' }}>
-            <SmartQueryInput
-                value={queryText}
-                aiMode={useAI}
-                batchMode={batchMode}
-                hasApiKey={user?.has_api_key}
-                tokensUsed={tokensUsed}
-                onValueChange={handleValueChange}
-                onQuery={handleQuery}
-                loading={loading}
-            />
+            <div className="dd-module dd-d1">
+                <SmartQueryInput
+                    value={queryText}
+                    aiMode={useAI}
+                    batchMode={batchMode}
+                    hasApiKey={user?.has_api_key}
+                    tokensUsed={tokensUsed}
+                    onValueChange={handleValueChange}
+                    onQuery={handleQuery}
+                    loading={loading}
+                />
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                <Space>
+            <div className="dd-module dd-d2" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10, alignItems: 'center', gap: 8 }}>
+                <Space size={8}>
                     <Tooltip title="配置查询结果表格的列显示和表头名称">
                         <Button
                             size="small"
@@ -371,10 +373,8 @@ export default function HomePage() {
                 </Space>
             </div>
 
-            <Divider style={{ margin: '8px 0 12px' }} />
-
             {!batchMode && (
-                <>
+                <div className="filter-bar dd-module dd-d3">
                     {/* 第一行：品类 / 品牌 筛选 */}
                     <Row gutter={[8, 8]} style={{ marginBottom: 8 }}>
                         <Col span={6}>
@@ -447,7 +447,7 @@ export default function HomePage() {
                             />
                         </Col>
                     </Row>
-                </>
+                </div>
             )}
 
             <QueryResult
@@ -475,17 +475,18 @@ export default function HomePage() {
                     <Divider style={{ margin: '16px 0 8px' }} />
                     <Card
                         size="small"
+                        className="dd-recommend-card dd-module dd-d4"
                         title={
                             <Space>
-                                <ShopOutlined style={{ color: '#faad14' }} />
-                                <span style={{ fontWeight: 500 }}>推荐产品</span>
-                                <Tag color="warning">来自其他公司</Tag>
+                                <ShopOutlined style={{ color: 'var(--accent-amber)' }} />
+                                <span style={{ fontWeight: 600 }}>推荐商品</span>
+                                <Tag color="warning" style={{ borderRadius: 999 }}>来自其他公司</Tag>
                                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-                                    以下为推荐产品，可加入方案，但保存时需联系对应公司购买
+                                    来自其他公司的推荐商品，可加入方案，保存时需联系对应公司购买
                                 </Typography.Text>
                             </Space>
                         }
-                        style={{ background: '#fffbe6', border: '1px solid #ffe58f', marginTop: 8 }}
+                        style={{ background: 'linear-gradient(135deg, #fffdf5 0%, #fff 100%)', border: '1px solid #f3e3b2', marginTop: 8 }}
                     >
                         <Table
                             dataSource={recommendedProducts}
@@ -495,7 +496,7 @@ export default function HomePage() {
                             scroll={{ x: 800 }}
                             columns={[
                                 { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: { showTitle: false }, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-                                { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 150, ellipsis: { showTitle: false }, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                                { title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 150, ellipsis: { showTitle: false }, render: (v) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
                                 { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
                                 {
                                     title: '图片', key: 'image', width: 65,
@@ -509,7 +510,7 @@ export default function HomePage() {
                                         );
                                     },
                                 },
-                                { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => <span style={{ color: '#cf1322', fontWeight: 600 }}>¥{Number(v).toFixed(2)}</span> },
+                                { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => <span className="price-highlight" style={{ fontSize: 13 }}>¥{Number(v).toFixed(2)}</span> },
                                 {
                                     title: '来源公司', dataIndex: 'source_company_name', key: 'source_company_name', width: 120,
                                     render: (v: string, r: RecommendedProduct) => (
@@ -519,7 +520,7 @@ export default function HomePage() {
                             ]}
                         />
                         <div style={{ textAlign: 'center', marginTop: 8, color: '#999', fontSize: 12 }}>
-                            如需购买推荐产品，请将其加入方案后，在「智能方案」页保存时会有购买提示
+                            如需购买推荐商品，请加入方案后，在「智能方案」页保存时按提示联系对应公司
                         </div>
                     </Card>
                 </>

@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Input, InputNumber, Row, Col, Divider, message, Table, Space, Tooltip, Modal, Typography, Alert, Card, Tag, Button, Select, Switch } from 'antd';
+import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { Input, InputNumber, Row, Col, Divider, message, Table, Space, Tooltip, Modal, Typography, Alert, Card, Tag, Button, Select } from 'antd';
 import { PlusOutlined, MinusCircleOutlined, DownloadOutlined, SaveOutlined, ShoppingCartOutlined, FileTextOutlined, HistoryOutlined, CheckCircleOutlined, SearchOutlined, DeleteOutlined, ColumnHeightOutlined, ShopOutlined, CloseCircleOutlined, ThunderboltFilled, DownOutlined, RightOutlined, RobotOutlined, BulbOutlined, RocketOutlined } from '@ant-design/icons';
 import { analyzeSolution, saveSolution, exportSolution, listSolutions, getSolutionDetail, deleteSolution, getColumnDisplayConfig, getRecommendedProducts, getRecommendedSolutions, fetchCategoryLevel3 } from '../services/api';
 import type { SolutionAnalyzeResult, SolutionItemData, SolutionCombination, SolutionSlotItem, SolutionSlotInput, SolutionDiagnosis, ColumnConfigItem, RecommendedProduct } from '../types';
 import { usePageState } from '../store/PageStateContext';
 import { useAuth } from '../store/AuthContext';
 import ColumnDisplayConfig from '../components/ColumnDisplayConfig';
+import { CountUpMoney } from '../hooks/useCountUp';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 /** 从结构化输入生成需求摘要文本（用于推荐/保存） */
 function buildRequirementSummary(
@@ -48,6 +49,68 @@ function buildRequirementSummary(
         parts.push(`${cat || '任意商品'}×${qty}${priceTxt}${discountTxt}`);
     });
     return parts.join('，');
+}
+
+/** 两档胶囊滑块：左=多块输入，右=AI 智能（点击/拖动切换） */
+function ModeSlider({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [dragging, setDragging] = useState(false);
+
+    const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const setByX = (clientX: number) => {
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (!rect || rect.width <= 0) return;
+            onChange((clientX - rect.left) / rect.width >= 0.5);
+        };
+        setByX(e.clientX);
+        setDragging(true);
+        const move = (ev: PointerEvent) => setByX(ev.clientX);
+        const up = () => {
+            setDragging(false);
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+    };
+
+    return (
+        // 容器（圆角背景条）
+        <div
+            ref={containerRef}
+            onPointerDown={handlePointerDown}
+            title={value ? 'AI 智能（右滑）' : '多块输入（左滑）'}
+            className="dd-mode-slider"
+            style={{
+                position: 'relative', display: 'flex', width: 240, height: 34,
+                background: '#f1f1ee', borderRadius: 17, overflow: 'hidden',
+                userSelect: 'none', touchAction: 'none', cursor: 'pointer', flexShrink: 0,
+            }}
+        >
+            {/* 滑块高亮：按 value 计算 left 位置，宽度占 1/2 */}
+            <div style={{
+                position: 'absolute', top: 3, bottom: 3,
+                left: `${value ? 50 : 0}%`,
+                width: 'calc(100% / 2)',
+                background: '#1f1f24',
+                borderRadius: 14,
+                transition: dragging ? 'none' : 'left 0.25s',
+            }} />
+            {/* 左档：多块输入 */}
+            <div style={{
+                flex: 1, position: 'relative', zIndex: 1, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                color: value ? '#8b8b8b' : '#fff', fontWeight: 600, fontSize: 13,
+            }}>多块输入</div>
+            {/* 右档：AI 智能 */}
+            <div style={{
+                flex: 1, position: 'relative', zIndex: 1, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                color: value ? '#fff' : '#8b8b8b', fontWeight: 600, fontSize: 13,
+            }}>AI 智能</div>
+        </div>
+    );
 }
 
 export default function SolutionPage() {
@@ -120,9 +183,9 @@ export default function SolutionPage() {
         const box = el.closest('.ant-input-number') as HTMLElement | null;
         const target = box || el;
         target.style.transition = 'border-color 0.3s, box-shadow 0.3s';
-        target.style.borderColor = '#722ed1';
+        target.style.borderColor = '#7c3aed';
         target.style.borderWidth = '2px';
-        target.style.boxShadow = '0 0 0 3px rgba(114,46,209,0.3)';
+        target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.3)';
         target.style.borderRadius = '6px';
         setTimeout(() => {
             target.style.borderColor = '';
@@ -325,7 +388,7 @@ export default function SolutionPage() {
                 return;
             }
             if (!user?.has_api_key) {
-                message.warning('未配置 API Key，无法使用 AI 智能输入。请在右上角用户菜单中配置。');
+                message.warning('使用 AI 智能输入需先配置 API Key：请点击右上角用户菜单中的「API Key 配置」');
                 return;
             }
             setLoading(true);
@@ -342,10 +405,10 @@ export default function SolutionPage() {
                 if (processed.total_solutions > 0) {
                     message.success(`找到 ${processed.total_solutions} 个符合条件的组合方案`);
                 } else if (processed.diagnosis?.length) {
-                    message.warning('暂未生成合适方案，已高亮需要调整的输入框，请按下方智能诊断建议调整');
+                    message.warning('未生成合适方案，已标出需要调整的输入框，请按下方诊断建议修改后重试');
                     autoHighlightDiagnosis(processed.diagnosis);
                 } else {
-                    message.info(processed.message || '未找到符合条件的组合方案');
+                    message.info(processed.message || '未找到符合条件的组合方案，试试放宽价格或折扣率限制');
                 }
             } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : '分析失败';
@@ -423,10 +486,10 @@ export default function SolutionPage() {
             if (processed.total_solutions > 0) {
                 message.success(`找到 ${processed.total_solutions} 个符合条件的组合方案`);
             } else if (processed.diagnosis?.length) {
-                message.warning('暂未生成合适方案，已高亮需要调整的输入框，请按下方智能诊断建议调整');
+                message.warning('未生成合适方案，已标出需要调整的输入框，请按下方诊断建议修改后重试');
                 autoHighlightDiagnosis(processed.diagnosis);
             } else {
-                message.info(processed.message || '未找到符合条件的组合方案');
+                message.info(processed.message || '未找到符合条件的组合方案，试试放宽价格或折扣率限制');
             }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : '分析失败';
@@ -595,7 +658,7 @@ export default function SolutionPage() {
             { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: true },
             { title: '型号', dataIndex: 'product_model', key: 'product_model', width: 110, ellipsis: true },
             {
-                title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 160,
+                title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 160,
                 ellipsis: { showTitle: false },
                 render: (v: string, record: SolutionSlotItem) => (
                     <Tooltip title={`${v || record.quick_model} (${record.brand})`}>
@@ -691,9 +754,9 @@ export default function SolutionPage() {
 
     return (
         <div style={{ margin: '0 auto', padding: '0 8px' }}>
-            {/* 顶部行：需求输入区 + 方案预览并列 */}
+            {/* 顶部行：需求输入区 + 方案预览并列（6 : 4） */}
             <Row gutter={16} align="stretch">
-                <Col xs={24} md={14}>
+                <Col xs={24} md={{ flex: '60%' }} className="dd-module dd-d1">
                     {/* 需求输入区 */}
                     <Card size="small" style={{ marginBottom: 16, height: '100%' }}>
                         {aiMode ? (
@@ -764,14 +827,8 @@ export default function SolutionPage() {
                                     </span>
                                 </div>
 
-                                {/* 商品信息整个区块做成下拉列表（点击标题整体展开/收起） */}
-                                <div style={{
-                                    border: '1px solid #f0f0f0',
-                                    borderRadius: 6,
-                                    marginBottom: 12,
-                                    background: '#fafafa',
-                                    overflow: 'hidden',
-                                }}>
+                                {/* 商品信息整个区块做成下拉列表（点击标题整体展开/收起，平滑手风琴） */}
+                                <div className="dd-collapse-block" style={{ marginBottom: 12 }}>
                                     <div
                                         onClick={() => updateState({ slotsOpen: !slotsOpen })}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', cursor: 'pointer', userSelect: 'none' }}
@@ -784,8 +841,14 @@ export default function SolutionPage() {
                                         <Text type="secondary" style={{ fontSize: 12 }}>（点击{slotsOpen ? '收起' : '展开'}）</Text>
                                         <div style={{ flex: 1 }} />
                                     </div>
-                                    {slotsOpen && (
-                                        <div style={{ padding: '0 10px 10px', borderTop: '1px solid #f0f0f0' }}>
+                                    {/* grid-rows 技巧：0fr → 1fr 平滑展开/收起 */}
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateRows: slotsOpen ? '1fr' : '0fr',
+                                        transition: 'grid-template-rows 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    }}>
+                                        <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                                            <div style={{ padding: '0 10px 10px', borderTop: '1px solid #f0f0f0' }}>
                                             {slots.map((slot, idx) => (
                                                 <div key={idx} style={{
                                                     border: '1px solid #f0f0f0',
@@ -807,7 +870,7 @@ export default function SolutionPage() {
                                                             filterOption={(input, option) =>
                                                                 (option?.label as string ?? '').toLowerCase().includes(input.toLowerCase())
                                                             }
-                                                            notFoundContent="未找到匹配的三级品类"
+                                                            notFoundContent="未找到匹配的三级品类，试试其他关键词"
                                                             style={{ width: 120 }}
                                                         />
                                                         <InputNumber
@@ -872,13 +935,14 @@ export default function SolutionPage() {
                                                 添加商品
                                             </Button>
                                         </div>
-                                    )}
+                                    </div>
+                                    </div>
                                 </div>
                             </>
                         )}
 
                         <Space wrap size={[8, 8]}>
-                            <Button type="primary" icon={<SearchOutlined />} onClick={handleAnalyze} loading={loading}>
+                            <Button type="primary" icon={<SearchOutlined />} onClick={handleAnalyze} loading={loading} className="dd-shimmer">
                                 生成组合方案
                             </Button>
                             <Button icon={<FileTextOutlined />} onClick={openHistory}>
@@ -888,30 +952,28 @@ export default function SolutionPage() {
                                 列配置
                             </Button>
                             <Divider type="vertical" />
-                            <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                                 <Text type="secondary" style={{ fontSize: 12 }}>输入方式</Text>
-                                <Switch
-                                    checked={aiMode}
+                                <ModeSlider
+                                    value={aiMode}
                                     onChange={v => updateState({ aiMode: v })}
-                                    checkedChildren="AI 智能"
-                                    unCheckedChildren="多块输入"
                                 />
                             </span>
                         </Space>
                         <div style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
                             {aiMode
-                                ? '提示：输入一段自然语言需求（如：总价500左右，含移动电源、自拍杆各一个，整体折扣率低于70%），AI 将自动解析并生成组合方案'
-                                : '提示：总价为必填项；产品品类（三级品类）、数量必填，价格限制、折扣率可选（选择「不限」或留空则不限制）；点击「添加商品」可增加更多商品信息'}
+                                ? '提示：输入自然语言需求即可，例如「总价500左右，含移动电源、自拍杆各一个，整体折扣率低于70%」'
+                                : '提示：总价必填；三级品类与数量必填；价格、折扣率限制可选。点击「添加商品」可添加更多商品'}
                         </div>
                         {result?.tokens_used ? (
-                            <div style={{ marginTop: 4, color: '#722ed1', fontSize: 12 }}>
+                            <div style={{ marginTop: 4, color: '#7c3aed', fontSize: 12 }}>
                                 本次分析消耗 <strong>{result.tokens_used}</strong> tokens
                             </div>
                         ) : null}
                     </Card>
                 </Col>
 
-                <Col xs={24} md={10}>
+                <Col xs={24} md={{ flex: '40%' }} className="dd-module dd-d2">
                     {/* 右侧：方案预览 */}
                     <Card
                         size="small"
@@ -933,13 +995,13 @@ export default function SolutionPage() {
                                 <div style={{ marginBottom: 8 }}>
                                     <Space direction="vertical" style={{ width: '100%' }}>
                                         <div><Text type="secondary">商品数：</Text><Text strong>{selectedSolution.total_quantity} 件</Text></div>
-                                        <div><Text type="secondary">总金额：</Text><Text strong style={{ fontSize: 18, color: '#cf1322' }}>¥{selectedSolution.total_price.toFixed(2)}</Text></div>
+                                        <div><Text type="secondary">总金额：</Text><CountUpMoney value={selectedSolution.total_price} fontSize={20} strong /></div>
                                         <div><Text type="secondary">平均折扣率：</Text><Text strong>{selectedSolution.total_discount_rate.toFixed(1)}%</Text></div>
                                     </Space>
                                 </div>
                                 <Divider style={{ margin: '8px 0' }} />
                                 {/* 商品明细下拉列表（可收起，无滑动条） */}
-                                <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginBottom: 8, background: '#fafafa', overflow: 'hidden' }}>
+                                <div className="dd-collapse-block" style={{ marginBottom: 8 }}>
                                     <div
                                         onClick={() => updateState({ previewItemsOpen: !previewItemsOpen })}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', userSelect: 'none' }}
@@ -952,31 +1014,38 @@ export default function SolutionPage() {
                                         <Text type="secondary" style={{ fontSize: 12 }}>（点击{previewItemsOpen ? '收起' : '展开'}）</Text>
                                         <div style={{ flex: 1 }} />
                                     </div>
-                                    {previewItemsOpen && (
-                                        <div style={{ padding: '0 10px', background: '#fff', borderTop: '1px solid #f0f0f0' }}>
-                                            {selectedSolution.items.map((item, idx) => (
-                                                <div key={idx} style={{
-                                                    padding: '6px 0', borderBottom: idx < selectedSolution.items.length - 1 ? '1px solid #f0f0f0' : 'none',
-                                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                                }}>
-                                                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                                                        <Tooltip title={item.product_name || item.quick_model}>
-                                                            <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                                {item.product_name || item.quick_model}
+                                    {/* grid-rows 技巧：0fr → 1fr 平滑展开/收起 */}
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateRows: previewItemsOpen ? '1fr' : '0fr',
+                                        transition: 'grid-template-rows 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    }}>
+                                        <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                                            <div style={{ padding: '0 10px', background: '#fff', borderTop: '1px solid #f0f0f0' }}>
+                                                {selectedSolution.items.map((item, idx) => (
+                                                    <div key={idx} style={{
+                                                        padding: '6px 0', borderBottom: idx < selectedSolution.items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                    }}>
+                                                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                            <Tooltip title={item.product_name || item.quick_model}>
+                                                                <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                    {item.product_name || item.quick_model}
+                                                                </div>
+                                                            </Tooltip>
+                                                            <div style={{ fontSize: 12, color: '#999' }}>
+                                                                {item.quick_model} | {item.brand} | {item.category_level1} | ¥{item.price.toFixed(2)}
                                                             </div>
-                                                        </Tooltip>
-                                                        <div style={{ fontSize: 12, color: '#999' }}>
-                                                            {item.quick_model} | {item.brand} | {item.category_level1} | ¥{item.price.toFixed(2)}
+                                                        </div>
+                                                        <div style={{ textAlign: 'right', minWidth: 80 }}>
+                                                            <div className="dd-amount" style={{ fontSize: 13 }}>¥{item.subtotal.toFixed(2)}</div>
+                                                            <div style={{ fontSize: 11, color: '#999' }}>×{item.quantity}</div>
                                                         </div>
                                                     </div>
-                                                    <div style={{ textAlign: 'right', minWidth: 80 }}>
-                                                        <div style={{ fontSize: 13, color: '#cf1322' }}>¥{item.subtotal.toFixed(2)}</div>
-                                                        <div style={{ fontSize: 11, color: '#999' }}>×{item.quantity}</div>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                ))}
+                                            </div>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                                 <Divider style={{ margin: '8px 0' }} />
                                 <Space style={{ width: '100%', justifyContent: 'space-between' }}>
@@ -993,7 +1062,7 @@ export default function SolutionPage() {
                                     )}
                                 </Space>
                                 {savedPlanId && (
-                                    <Alert type="success" showIcon
+                                    <Alert type="success" showIcon className="dd-fade-in"
                                         message={<span>已保存（ID: {savedPlanId}），可导出 Excel 表格</span>}
                                         style={{ marginTop: 8 }} />
                                 )}
@@ -1014,28 +1083,30 @@ export default function SolutionPage() {
                     {result.ai_interpretation && (
                         <Alert type="success" showIcon icon={<ThunderboltFilled />}
                             message={<Text strong>{result.ai_interpretation}</Text>}
-                            style={{ marginBottom: 12, background: '#fffbe6', border: '1px solid #ffe58f' }} />
+                            style={{ marginBottom: 12, background: 'var(--accent-amber-bg)', border: '1px solid #f3e3b2' }} />
                     )}
                     {result.total_solutions === 0 && result.diagnosis?.length ? (
                         <Card
                             size="small"
+                            className="dd-diagnosis-card dd-fade-up"
                             style={{
                                 marginBottom: 12,
-                                border: '1px solid #d3adf7',
-                                background: 'linear-gradient(135deg, #f9f0ff 0%, #f0f5ff 100%)',
+                                border: '1px solid #e4d5f7',
+                                background: 'linear-gradient(135deg, #faf5ff 0%, #f5f7ff 100%)',
                             }}
                         >
                             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                                 <div style={{
                                     width: 36, height: 36, borderRadius: '50%',
-                                    background: '#722ed1', color: '#fff',
+                                    background: '#7c3aed', color: '#fff',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     marginRight: 10, fontSize: 18, flexShrink: 0,
+                                    boxShadow: '0 2px 8px rgba(124,58,237,0.35)',
                                 }}>
                                     <RobotOutlined />
                                 </div>
                                 <div>
-                                    <Text strong style={{ fontSize: 15, color: '#531dab', display: 'block' }}>
+                                    <Text strong style={{ fontSize: 15, color: '#5b21b6', display: 'block' }}>
                                         🤖 智能方案诊断
                                     </Text>
                                     <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1043,20 +1114,22 @@ export default function SolutionPage() {
                                     </Text>
                                 </div>
                             </div>
-                            {(result.diagnosis as SolutionDiagnosis[]).map((d, idx) => {
-                                const adj = d.adjust;
-                                const isCategoryPick = adj?.field === 'category';
-                                const hasApplyBtn = !!adj && !isCategoryPick;
-                                return (
-                                    <div key={idx} style={{
-                                        padding: '8px 12px', marginBottom: 8,
-                                        background: 'rgba(255,255,255,0.9)', borderRadius: 8,
-                                        borderLeft: '3px solid #722ed1',
-                                    }}>
+                            <div className="dd-stagger">
+                                {(result.diagnosis as SolutionDiagnosis[]).map((d, idx) => {
+                                    const adj = d.adjust;
+                                    const isCategoryPick = adj?.field === 'category';
+                                    const hasApplyBtn = !!adj && !isCategoryPick;
+                                    return (
+                                        <div key={idx} style={{
+                                            padding: '8px 12px', marginBottom: 8,
+                                            background: 'rgba(255,255,255,0.92)', borderRadius: 10,
+                                            borderLeft: '3px solid #7c3aed',
+                                            boxShadow: '0 1px 3px rgba(124,58,237,0.08)',
+                                        }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
                                                 <Tag color="purple" style={{ marginRight: 6 }}>诊断 {idx + 1}</Tag>
-                                                <Text strong style={{ color: '#531dab' }}>{d.title}</Text>
+                                                <Text strong style={{ color: '#5b21b6' }}>{d.title}</Text>
                                             </div>
                                             {hasApplyBtn && (
                                                 <Button
@@ -1066,11 +1139,11 @@ export default function SolutionPage() {
                                                     style={{
                                                         flexShrink: 0,
                                                         marginLeft: 8,
-                                                        background: 'linear-gradient(135deg, #722ed1 0%, #9254de 100%)',
+                                                        background: 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)',
                                                         border: 'none',
                                                         color: '#fff',
                                                         fontWeight: 600,
-                                                        boxShadow: '0 2px 6px rgba(114,46,209,0.35)',
+                                                        boxShadow: '0 2px 6px rgba(124,58,237,0.35)',
                                                     }}
                                                 >
                                                     一键应用建议
@@ -1085,7 +1158,7 @@ export default function SolutionPage() {
                                         </div>
                                         {isCategoryPick && adj?.slot_index != null && (
                                             <div style={{ marginTop: 6, display: 'flex', alignItems: 'center' }}>
-                                                <Text style={{ marginRight: 8, color: '#531dab', flexShrink: 0 }}>更换为：</Text>
+                                                <Text style={{ marginRight: 8, color: '#5b21b6', flexShrink: 0 }}>更换为：</Text>
                                                 <Select
                                                     showSearch
                                                     size="small"
@@ -1106,7 +1179,8 @@ export default function SolutionPage() {
                                         )}
                                     </div>
                                 );
-                            })}
+                                })}
+                            </div>
                         </Card>
                     ) : (
                         <Alert
@@ -1144,33 +1218,30 @@ export default function SolutionPage() {
                                     按价格 {sortOrder === 'asc' ? '升序' : sortOrder === 'desc' ? '降序' : '智能'}
                                 </Button>
                             </div>
-                            <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                            <div className="dd-fade-up dd-stagger" style={{ maxHeight: 600, overflowY: 'auto' }}>
                                 {result.solutions.map((sol: SolutionCombination, idx: number) => (
                                     <Card
                                         key={idx}
                                         size="small"
+                                        className={`dd-solution-card ${selectedSolutionIdx === idx ? 'ant-card-selected' : ''}`}
                                         style={{
                                             marginBottom: 12,
                                             cursor: 'pointer',
-                                            border: selectedSolutionIdx === idx ? '2px solid #1677ff' : '1px solid #f0f0f0',
-                                            background: selectedSolutionIdx === idx ? '#f0f5ff' : '#fff',
+                                            background: selectedSolutionIdx === idx ? '#fafaf9' : '#fff',
                                         }}
                                         onClick={() => selectSolution(idx)}
                                         title={
-                                            <Space>
-                                                <CheckCircleOutlined style={{
-                                                    color: selectedSolutionIdx === idx ? '#1677ff' : '#d9d9d9',
-                                                    fontSize: 16,
-                                                }} />
-                                                <Text strong>方案 {idx + 1}</Text>
-                                                <Tag color="blue">¥{sol.total_price.toFixed(2)}</Tag>
-                                                <Tag color="green">{sol.total_quantity} 件</Tag>
-                                                <Tag color="orange">{sol.total_discount_rate.toFixed(1)}%</Tag>
+                                            <Space size={6}>
+                                                <span className="dd-solution-number">{(idx + 1).toString().padStart(2, '0')}</span>
+                                                <Text strong>方案</Text>
+                                                <Tag color="default" style={{ borderRadius: 999 }}>¥{sol.total_price.toFixed(2)}</Tag>
+                                                <Tag color="default" style={{ borderRadius: 999 }}>{sol.total_quantity} 件</Tag>
+                                                <Tag color="default" style={{ borderRadius: 999 }}>{sol.total_discount_rate.toFixed(1)}%</Tag>
                                             </Space>
                                         }
                                         extra={
                                             selectedSolutionIdx === idx
-                                                ? <Tag color="success" icon={<CheckCircleOutlined />}>已选</Tag>
+                                                ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ borderRadius: 999 }}>已选</Tag>
                                                 : null
                                         }
                                     >
@@ -1197,13 +1268,12 @@ export default function SolutionPage() {
                         </>
                     )}
                     {!result.solutions?.length && !result.ai_interpretation && (
-                        <div style={{ textAlign: 'center', padding: '80px 0', color: '#999' }}>
-                            <Title level={4} type="secondary" style={{ fontWeight: 'normal' }}>
-                                输入产品组合需求，生成最优搭配方案
-                            </Title>
-                            <Text type="secondary">
-                                例如：我需要一个价值500元的礼盒，包含三个产品...
-                            </Text>
+                        <div className="dd-empty" style={{ padding: '56px 0 48px' }}>
+                            <div className="dd-empty-mark">✦</div>
+                            <div className="dd-empty-title">输入需求，生成最优搭配</div>
+                            <div className="dd-empty-desc">
+                                例如：我需要一个价值 500 元的礼盒，包含三个产品…
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1211,13 +1281,12 @@ export default function SolutionPage() {
 
             {/* 无结果时的默认提示 */}
             {!result && (
-                <div style={{ textAlign: 'center', padding: '80px 0', color: '#999' }}>
-                    <Title level={4} type="secondary" style={{ fontWeight: 'normal' }}>
-                        输入产品组合需求，生成最优搭配方案
-                    </Title>
-                    <Text type="secondary">
-                        例如：我需要一个价值500元的礼盒，包含三个产品...
-                    </Text>
+                <div className="dd-empty" style={{ padding: '72px 0 64px' }}>
+                    <div className="dd-empty-mark">✦</div>
+                    <div className="dd-empty-title">输入需求，生成最优搭配</div>
+                    <div className="dd-empty-desc">
+                        例如：我需要一个价值 500 元的礼盒，包含三个产品，整体折扣率低于 70%…
+                    </div>
                 </div>
             )}
 
@@ -1227,17 +1296,18 @@ export default function SolutionPage() {
                     <Divider style={{ margin: '16px 0 8px' }} />
                     <Card
                         size="small"
+                        className="dd-recommend-card dd-fade-up"
                         title={
                             <Space>
-                                <ShopOutlined style={{ color: '#52c41a' }} />
-                                <span style={{ fontWeight: 500 }}>推荐方案</span>
-                                <Tag color="success">来自其他公司</Tag>
+                                <ShopOutlined style={{ color: '#16a34a' }} />
+                                <span style={{ fontWeight: 600 }}>推荐方案</span>
+                                <Tag color="success" style={{ borderRadius: 999 }}>来自其他公司</Tag>
                                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
                                     以下为使用其他公司商品生成的推荐方案，可供参考
                                 </Typography.Text>
                             </Space>
                         }
-                        style={{ background: '#f6ffed', border: '1px solid #b7eb8f', marginTop: 8 }}
+                        style={{ background: 'linear-gradient(135deg, #f6fef8 0%, #fff 100%)', border: '1px solid #c9ebd2', marginTop: 8 }}
                     >
                         <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                             {recommendedSolutions.map((sol: any, idx: number) => (
@@ -1262,7 +1332,7 @@ export default function SolutionPage() {
                                         dataSource={sol.items || []}
                                         columns={[
                                             { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 120, ellipsis: true },
-                                            { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: true },
+                                            { title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 140, ellipsis: true },
                                             { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
                                             { title: '单价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => `¥${v?.toFixed(2) || '0.00'}` },
                                             { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 50 },
@@ -1285,17 +1355,18 @@ export default function SolutionPage() {
                     <Divider style={{ margin: '16px 0 8px' }} />
                     <Card
                         size="small"
+                        className="dd-recommend-card dd-fade-up"
                         title={
                             <Space>
-                                <ShopOutlined style={{ color: '#faad14' }} />
-                                <span style={{ fontWeight: 500 }}>推荐产品</span>
-                                <Tag color="warning">来自其他公司</Tag>
+                                <ShopOutlined style={{ color: 'var(--accent-amber)' }} />
+                                <span style={{ fontWeight: 600 }}>推荐商品</span>
+                                <Tag color="warning" style={{ borderRadius: 999 }}>来自其他公司</Tag>
                                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-                                    以下为推荐产品，来自其他公司，可供参考
+                                    来自其他公司的推荐商品，可加入方案，保存时需联系对应公司购买
                                 </Typography.Text>
                             </Space>
                         }
-                        style={{ background: '#fffbe6', border: '1px solid #ffe58f', marginTop: 8 }}
+                        style={{ background: 'linear-gradient(135deg, #fffdf5 0%, #fff 100%)', border: '1px solid #f3e3b2', marginTop: 8 }}
                     >
                         <Table
                             dataSource={recommendedProducts}
@@ -1305,7 +1376,7 @@ export default function SolutionPage() {
                             scroll={{ x: 800 }}
                             columns={[
                                 { title: '快查型号', dataIndex: 'quick_model', key: 'quick_model', width: 130, ellipsis: { showTitle: false }, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
-                                { title: '产品名称', dataIndex: 'product_name', key: 'product_name', width: 150, ellipsis: { showTitle: false }, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
+                                { title: '商品名称', dataIndex: 'product_name', key: 'product_name', width: 150, ellipsis: { showTitle: false }, render: (v: string) => v ? <Tooltip title={v}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span></Tooltip> : '-' },
                                 { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
                                 {
                                     title: '图片', key: 'image', width: 65,
@@ -1329,7 +1400,7 @@ export default function SolutionPage() {
                             ]}
                         />
                         <div style={{ textAlign: 'center', marginTop: 8, color: '#999', fontSize: 12 }}>
-                            如需购买推荐产品，可联系对应公司
+                            如需购买推荐商品，请联系对应公司
                         </div>
                     </Card>
                 </>
@@ -1347,9 +1418,9 @@ export default function SolutionPage() {
             {/* 历史方案对话框 */}
             <Modal title="📂 历史方案" open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={680} destroyOnHidden>
                 {historyLoading ? (
-                    <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
+                    <div style={{ textAlign: 'center', padding: 40 }}>正在加载历史方案...</div>
                 ) : historyList.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无历史方案</div>
+                    <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>还没有保存过方案，生成方案后可在这里查看和复用</div>
                 ) : (
                     <Table
                         dataSource={historyList}
