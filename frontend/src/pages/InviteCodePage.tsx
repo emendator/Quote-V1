@@ -103,7 +103,7 @@ const InviteCodePage: React.FC = () => {
             : '';
         Modal.confirm({
             title: '确认删除此邀请码？',
-            icon: <WarningOutlined style={{ color: '#faad14' }} />,
+            icon: <WarningOutlined style={{ color: 'var(--accent-amber)' }} />,
             content: (
                 <div>
                     <p>邀请码：<Text code>{record.code}</Text></p>
@@ -215,7 +215,7 @@ const InviteCodePage: React.FC = () => {
             dataIndex: 'company_name',
             key: 'company_name',
             width: 200,
-            render: (v: string) => v || <span style={{ color: '#ccc' }}>-</span>,
+            render: (v: string) => v || <span style={{ color: 'var(--ink-300)' }}>-</span>,
         },
         {
             title: '状态',
@@ -228,12 +228,12 @@ const InviteCodePage: React.FC = () => {
             key: 'used_user',
             width: 120,
             render: (_: any, record: InviteCode) => {
-                if (!record.is_used || !record.used_by_username) return <span style={{ color: '#999' }}>-</span>;
+                if (!record.is_used || !record.used_by_username) return <span style={{ color: 'var(--ink-400)' }}>-</span>;
                 return (
                     <div>
                         <div style={{ fontWeight: 500, fontSize: 13 }}>{record.used_by_username}</div>
                         {record.used_by_company && (
-                            <div style={{ fontSize: 11, color: '#999' }}>{record.used_by_company}</div>
+                            <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>{record.used_by_company}</div>
                         )}
                     </div>
                 );

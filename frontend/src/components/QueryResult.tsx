@@ -130,7 +130,7 @@ const batchColumns: ColumnsType<Product> = [
         title: '方案', key: 'solution', width: 60, fixed: 'right',
         render: (_: unknown, record: Product) => {
             const isInCart = getSolutionCart().has(record.id);
-            return <Button size="small" type={isInCart ? 'primary' : 'default'} onClick={() => toggleSolutionCart(record)}>{isInCart ? '已加' : '加入'}</Button>;
+            return <Button key={isInCart ? 'in' : 'out'} size="small" type={isInCart ? 'primary' : 'default'} className={isInCart ? 'dd-state-pop' : undefined} onClick={() => toggleSolutionCart(record)}>{isInCart ? '已加' : '加入'}</Button>;
         },
     },
 ];
@@ -172,8 +172,10 @@ const columns: ColumnsType<Product> = [
             const isInCart = getSolutionCart().has(record.id);
             return (
                 <Button
+                    key={isInCart ? 'in' : 'out'}
                     size="small"
                     type={isInCart ? 'primary' : 'default'}
+                    className={isInCart ? 'dd-state-pop' : undefined}
                     onClick={() => toggleSolutionCart(record)}
                 >
                     {isInCart ? '已加' : '加入'}
@@ -397,8 +399,8 @@ export default function QueryResult({ result, batchMode, selectedRowKeys, onSele
             size="small"
             style={{
                 marginBottom: 16,
-                background: '#fffbe6',
-                border: '1px solid #ffe58f',
+                background: 'var(--accent-amber-bg)',
+                border: '1px solid var(--accent-amber-border)',
                 borderRadius: 8,
             }}
         >

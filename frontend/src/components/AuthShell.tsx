@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
+import { Button } from 'antd';
+import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import InteractiveBackground from './InteractiveBackground';
+import { useTheme } from '../store/ThemeContext';
 
 interface HeroPoint {
     num: string;
@@ -32,8 +35,17 @@ interface AuthShellProps {
 
 /** 编辑部式分栏外壳：左侧交互式品牌叙事，右侧表单面板 */
 export default function AuthShell({ children, points = DEFAULT_POINTS }: AuthShellProps) {
+    const { mode, toggleTheme } = useTheme();
     return (
         <div className="auth-page">
+            <Button
+                type="text"
+                className="dd-theme-toggle dd-theme-toggle-fixed"
+                aria-label={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+                title={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+                icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
+                onClick={toggleTheme}
+            />
             <div className="auth-hero">
                 <InteractiveBackground className="dd-interactive-bg" />
                 <div className="auth-aurora" />

@@ -36,6 +36,20 @@ function bindRipple() {
     });
 }
 
+/* ---------- 禁用按钮点击抖动（Shake Disabled Button） ----------
+   点击不可用按钮时左右抖动，提示「此操作当前不可用」 */
+function bindDisabledShake() {
+    document.addEventListener('pointerdown', (e) => {
+        if (prefersReduced()) return;
+        const target = e.target as HTMLElement;
+        const btn = target.closest?.('.ant-btn') as HTMLElement | null;
+        if (!btn || !(btn as HTMLButtonElement).disabled) return;
+        btn.classList.remove('dd-shake');
+        void btn.offsetWidth; // 强制 reflow，使动画可重放
+        btn.classList.add('dd-shake');
+    });
+}
+
 /* ---------- 磁性悬停 ---------- */
 function bindMagnetic(el: HTMLElement, strength = 0.3) {
     if (bound.has(el) || prefersReduced()) return;
@@ -95,6 +109,7 @@ function scan() {
 export function initGlobalMotion() {
     if (typeof document === 'undefined') return;
     bindRipple();
+    bindDisabledShake();
     scan();
     const mo = new MutationObserver(scan);
     mo.observe(document.body, { childList: true, subtree: true });

@@ -5,6 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="智能报价系统 —— 商品管理 · 智能查询 · 组合方案" />
+    <meta name="theme-color" content="#fafaf9" />
     <title>智能报价 · 让每一次报价恰到好处</title>
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231f1f24'/%3E%3Ctext x='32' y='44' font-family='Georgia, serif' font-size='36' fill='%23ffffff' text-anchor='middle'%3E%C2%A5%3C/text%3E%3C/svg%3E" />
@@ -20,6 +21,18 @@
                 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
         }
     </style>
+    <script>
+        // 首帧前应用已保存的外观模式，避免深色模式下闪烁浅色
+        (function () {
+            try {
+                var mode = window.localStorage.getItem('app_theme') === 'dark' ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', mode);
+                document.documentElement.style.colorScheme = mode;
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) meta.setAttribute('content', mode === 'dark' ? '#141417' : '#fafaf9');
+            } catch (e) { /* 忽略存储异常 */ }
+        })();
+    </script>
 </head>
 
 <body>

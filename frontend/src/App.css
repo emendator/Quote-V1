@@ -25,6 +25,12 @@
     --accent-red: #dc2626;
     --accent-green: #16a34a;
     --accent-purple: #7c3aed;
+    --accent-amber-border: #f3e3b2;
+    --accent-green-bg: #f0fdf4;
+    --accent-green-border: #c9ebd2;
+    --accent-purple-bg: #faf5ff;
+    --accent-purple-border: #e4d5f7;
+    --accent-indigo-bg: #f5f7ff;
 
     /* —— 字体 —— */
     --font-serif: 'Instrument Serif', 'Iowan Old Style', 'Palatino Linotype', Georgia,
@@ -45,6 +51,12 @@
     --shadow-md: 0 1px 2px rgba(24, 24, 27, 0.04), 0 8px 24px rgba(24, 24, 27, 0.06);
     --shadow-lg: 0 8px 40px rgba(24, 24, 27, 0.10);
     --ring: 0 0 0 3px rgba(79, 70, 229, 0.10);
+
+    /* —— 主题化辅助变量（随深浅色切换）—— */
+    --header-bg: rgba(255, 255, 255, 0.88);
+    --slider-track: #f1f1ee;
+    --slider-thumb: #1f1f24;
+    --on-primary: #ffffff;
 
     /* —— 动效 —— */
     --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -231,7 +243,7 @@ body {
     top: 0;
     z-index: 20;
     backdrop-filter: blur(8px);
-    background: rgba(255, 255, 255, 0.88) !important;
+    background: var(--header-bg) !important;
 }
 
 .dd-page-title {
@@ -552,7 +564,7 @@ body {
 }
 
 .ant-pagination .ant-pagination-item-active a {
-    color: #fff !important;
+    color: var(--on-primary) !important;
 }
 
 /* ============================================================
@@ -1027,6 +1039,129 @@ body {
 }
 
 /* ============================================================
+   detail.design 工艺细节落地（第二批）
+   ============================================================ */
+
+/* —— 特殊文字选中色（Special Text Selection Style）—— */
+::selection {
+    background: rgba(79, 70, 229, 0.16);
+    color: inherit;
+}
+
+/* —— 彩色光标（Colorful Cursor Blink）—— */
+.query-shell .query-textarea {
+    caret-color: var(--accent-amber);
+}
+.ant-input,
+.ant-input-affix-wrapper input,
+.ant-input-number-input,
+.ant-select-selection-search-input {
+    caret-color: var(--accent-indigo);
+}
+
+/* —— 禁用按钮点击抖动（Shake Disabled Button）—— */
+@keyframes ddShakeX {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-5px); }
+    40% { transform: translateX(4px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(2px); }
+}
+.dd-shake {
+    animation: ddShakeX 0.4s ease;
+}
+
+/* —— 滚动容器边缘渐隐（Progressive Blur Edge，保留滚动条）—— */
+.dd-fade-edge {
+    position: relative;
+}
+.dd-fade-edge::after {
+    content: '';
+    position: sticky;
+    bottom: -1px;
+    display: block;
+    height: 26px;
+    margin-top: -26px;
+    background: linear-gradient(180deg, transparent, var(--paper));
+    pointer-events: none;
+}
+
+/* —— 动作按钮：图标悬停滑动（Animated Action Button）—— */
+.dd-cta .anticon {
+    transition: transform 0.22s var(--ease-out);
+}
+.dd-cta:hover .anticon {
+    transform: translateX(3px);
+}
+
+/* —— 菜单图标悬停位移（Shifting Icon）—— */
+.dd-sider .ant-menu-item .anticon {
+    transition: transform 0.2s var(--ease-spring);
+}
+.dd-sider .ant-menu-item:hover .anticon {
+    transform: translateX(3px);
+}
+
+/* —— AI 模式输入壳琥珀光晕（Bring Life to AI Features）—— */
+.query-shell.ai-active {
+    border-color: rgba(232, 168, 10, 0.55);
+    box-shadow: 0 0 0 3px rgba(232, 168, 10, 0.14), var(--shadow-sm);
+}
+
+/* —— 标题文字裁切（CSS Text-Box Trim，渐进增强）—— */
+.dd-page-title h2,
+.auth-hero-title,
+.dd-brand-name,
+.dd-empty-title {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+}
+
+/* —— 标签全量胶囊化（Pill Tags）—— */
+.ant-tag {
+    border-radius: 999px;
+}
+
+/* —— 表格内小按钮加大点击区（Larger Hit Area）—— */
+.ant-table .ant-btn-sm {
+    min-height: 28px;
+}
+
+/* —— 内外圆角规则（Outer & Inner Radius）：卡片内图片圆角收小 —— */
+.ant-card .product-image-thumb {
+    border-radius: 6px;
+}
+
+/* —— 交互式 404 页面 —— */
+.dd-404-digits {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 18px;
+    font-family: var(--font-serif);
+    font-size: clamp(72px, 12vw, 132px);
+    font-weight: 600;
+    line-height: 1;
+    color: var(--ink-200);
+    user-select: none;
+}
+
+.dd-404-digits > span {
+    transition: transform 0.3s var(--ease-spring);
+    display: inline-block;
+}
+
+.dd-404-digits > span:hover {
+    transform: translateY(-10px) rotate(-4deg);
+    color: var(--ink-800);
+}
+
+.dd-404-coin {
+    color: var(--accent-amber) !important;
+    animation: ddFloat 4s ease-in-out infinite;
+}
+
+/* ============================================================
    其余通用样式（保留原有类名）
    ============================================================ */
 
@@ -1119,6 +1254,11 @@ body {
 /* 购物车角标弹跳 */
 .dd-badge-pop .ant-badge-count {
     animation: ddBounceIn 0.45s var(--ease-spring) both;
+}
+
+/* 状态图标/按钮弹跳（Animated State-Based Icons） */
+.dd-state-pop {
+    animation: ddBounceIn 0.35s var(--ease-spring) both;
 }
 
 /* AI 模式图标呼吸脉冲 */
@@ -1399,6 +1539,135 @@ body {
     background-size: 400% 100%;
     animation: ant-skeleton-loading 1.4s ease infinite;
 }
+
+
+/* ============================================================
+   深色模式（Dark Mode）
+   由 ThemeContext 在 <html data-theme="dark"> 上启用，
+   通过重定义 CSS 变量 + 少量针对性覆盖实现完整深色外观。
+   ============================================================ */
+
+html[data-theme='dark'] {
+    color-scheme: dark;
+
+    /* —— 墨色刻度反向：900 最亮（正文），50 最暗（填充底）—— */
+    --ink-900: #f2f2f6;
+    --ink-800: #d6d6de;
+    --ink-700: #e6e6ec;
+    --ink-600: #a1a1aa;
+    --ink-500: #8e8e98;
+    --ink-400: #7d7d87;
+    --ink-300: #56565f;
+    --ink-200: #37373f;
+    --ink-100: #2c2c33;
+    --ink-50: #26262d;
+
+    /* —— 画布 —— */
+    --paper: #141417;
+    --surface: #1c1c21;
+
+    /* —— 强调色（提亮，保证深底对比）—— */
+    --accent-indigo: #818cf8;
+    --accent-amber: #f0b429;
+    --accent-amber-bg: rgba(232, 168, 10, 0.14);
+    --accent-amber-border: rgba(232, 168, 10, 0.38);
+    --accent-red: #f87171;
+    --accent-green: #4ade80;
+    --accent-purple: #a78bfa;
+    --accent-green-bg: rgba(22, 163, 74, 0.14);
+    --accent-green-border: rgba(22, 163, 74, 0.40);
+    --accent-purple-bg: rgba(124, 58, 237, 0.16);
+    --accent-purple-border: rgba(124, 58, 237, 0.42);
+    --accent-indigo-bg: rgba(79, 70, 229, 0.16);
+
+    /* —— 阴影：深色下更重、更收 —— */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 6px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.50);
+    --ring: 0 0 0 3px rgba(129, 140, 248, 0.22);
+
+    /* —— 主题化辅助变量 —— */
+    --header-bg: rgba(28, 28, 33, 0.88);
+    --slider-track: #26262d;
+    --slider-thumb: #4a4a54;
+    --on-primary: #18181b;
+}
+
+html[data-theme='dark'] body {
+    background: var(--paper);
+    color: var(--ink-900);
+}
+
+html[data-theme='dark'] ::-webkit-scrollbar-thumb {
+    background: #3a3a42;
+}
+html[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+    background: #4a4a54;
+}
+
+/* 品牌徽标：保持深色徽章 + 浅色符号 */
+html[data-theme='dark'] .dd-brand-mark {
+    background: linear-gradient(135deg, #2e2e37 0%, #45454f 100%);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* 头像底色：避免浅墨色 + 白色图标对比不足 */
+html[data-theme='dark'] .dd-user-chip .ant-avatar {
+    background: #3f3f48 !important;
+}
+
+/* 登录页特色卡片：白色半透明 → 深色半透明 */
+html[data-theme='dark'] .auth-hero-point {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* 骨架屏：深色波浪 */
+html[data-theme='dark'] .ant-skeleton.ant-skeleton-active .ant-skeleton-title,
+html[data-theme='dark'] .ant-skeleton.ant-skeleton-active .ant-skeleton-paragraph > li,
+html[data-theme='dark'] .ant-skeleton.ant-skeleton-active .ant-skeleton-avatar,
+html[data-theme='dark'] .ant-skeleton.ant-skeleton-active .ant-skeleton-input {
+    background: linear-gradient(90deg, #232329 25%, #2f2f37 37%, #232329 63%);
+    background-size: 400% 100%;
+}
+
+html[data-theme='dark'] .dd-recommend-card .ant-card-head {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme='dark'] .ant-modal .ant-modal-content {
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.50);
+}
+
+/* 主题切换按钮 */
+.dd-theme-toggle.ant-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid var(--ink-100);
+    color: var(--ink-500);
+    background: var(--surface);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    transition: all 0.18s ease;
+}
+
+.dd-theme-toggle.ant-btn:hover {
+    color: var(--ink-900) !important;
+    border-color: var(--ink-200) !important;
+    background: var(--ink-50) !important;
+    transform: translateY(-1px);
+}
+
+/* 登录/注册页右上角悬浮切换按钮 */
+.dd-theme-toggle-fixed {
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    z-index: 30;
+}
+
 
 /* —— 减少动效偏好 —— */
 @media (prefers-reduced-motion: reduce) {

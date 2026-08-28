@@ -84,7 +84,7 @@ function ModeSlider({ value, onChange }: { value: boolean; onChange: (v: boolean
             className="dd-mode-slider"
             style={{
                 position: 'relative', display: 'flex', width: 240, height: 34,
-                background: '#f1f1ee', borderRadius: 17, overflow: 'hidden',
+                background: 'var(--slider-track)', borderRadius: 17, overflow: 'hidden',
                 userSelect: 'none', touchAction: 'none', cursor: 'pointer', flexShrink: 0,
             }}
         >
@@ -93,7 +93,7 @@ function ModeSlider({ value, onChange }: { value: boolean; onChange: (v: boolean
                 position: 'absolute', top: 3, bottom: 3,
                 left: `${value ? 50 : 0}%`,
                 width: 'calc(100% / 2)',
-                background: '#1f1f24',
+                background: 'var(--slider-thumb)',
                 borderRadius: 14,
                 transition: dragging ? 'none' : 'left 0.25s',
             }} />
@@ -101,13 +101,13 @@ function ModeSlider({ value, onChange }: { value: boolean; onChange: (v: boolean
             <div style={{
                 flex: 1, position: 'relative', zIndex: 1, display: 'flex',
                 alignItems: 'center', justifyContent: 'center',
-                color: value ? '#8b8b8b' : '#fff', fontWeight: 600, fontSize: 13,
+                color: value ? 'var(--ink-400)' : '#fff', fontWeight: 600, fontSize: 13,
             }}>多块输入</div>
             {/* 右档：AI 智能 */}
             <div style={{
                 flex: 1, position: 'relative', zIndex: 1, display: 'flex',
                 alignItems: 'center', justifyContent: 'center',
-                color: value ? '#fff' : '#8b8b8b', fontWeight: 600, fontSize: 13,
+                color: value ? '#fff' : 'var(--ink-400)', fontWeight: 600, fontSize: 13,
             }}>AI 智能</div>
         </div>
     );
@@ -140,8 +140,9 @@ export default function SolutionPage() {
 
     const { requirement, useAI, aiMode, aiText, totalPrice, totalPriceOp, totalDiscount, totalDiscountOp, slotsOpen, previewItemsOpen, slots, result, solutionName, savedPlanId, selectedSolutionIdx } = pageState;
     const updateState = useCallback((patch: Partial<typeof pageState>) => {
-        setPageState({ ...pageState, ...patch });
-    }, [pageState, setPageState]);
+        // 函数式更新：始终基于最新状态合并，避免异步回调用旧闭包覆盖新状态
+        setPageState(prev => ({ ...prev, ...patch }));
+    }, [setPageState]);
 
     // ====== 结构化输入：商品信息块操作 ======
 
@@ -183,7 +184,7 @@ export default function SolutionPage() {
         const box = el.closest('.ant-input-number') as HTMLElement | null;
         const target = box || el;
         target.style.transition = 'border-color 0.3s, box-shadow 0.3s';
-        target.style.borderColor = '#7c3aed';
+        target.style.borderColor = 'var(--accent-purple)';
         target.style.borderWidth = '2px';
         target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.3)';
         target.style.borderRadius = '6px';
@@ -640,11 +641,11 @@ export default function SolutionPage() {
 
     // 组合方案表格列定义
     const renderImage = (v: string) => {
-        if (!v || v === '') return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
+        if (!v || v === '') return <span style={{ color: 'var(--ink-300)', fontSize: 12 }}>无图</span>;
         const src = v.startsWith('data:') ? v : `data:image/png;base64,${v}`;
         return (
             <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
-                <img src={src} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+                <img src={src} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--ink-100)', cursor: 'pointer' }} />
             </Tooltip>
         );
     };
@@ -682,7 +683,7 @@ export default function SolutionPage() {
             { title: '规格', dataIndex: 'specification', key: 'specification', width: 110, ellipsis: true },
             {
                 title: '代发价', dataIndex: 'price', key: 'price', width: 70,
-                render: (v: number) => <Text strong style={{ color: '#cf1322' }}>¥{v.toFixed(2)}</Text>
+                render: (v: number) => <Text strong style={{ color: 'var(--accent-red)' }}>¥{v.toFixed(2)}</Text>
             },
             { title: '零售价', dataIndex: 'retail_price', key: 'retail_price', width: 70, render: (v: number) => v ? `¥${v.toFixed(2)}` : '-' },
             { title: '折扣率', dataIndex: 'discount_rate', key: 'discount_rate', width: 60, render: (v: number) => v ? `${v.toFixed(1)}%` : '-' },
@@ -766,8 +767,32 @@ export default function SolutionPage() {
                                     rows={4}
                                     value={aiText}
                                     onChange={e => updateState({ aiText: e.target.value })}
+                                    onKeyDown={(e) => {
+                                        // 中文输入法守卫：Enter 在拼音组合中不触发（Handle CJK Input Method Differently）
+                                        if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleAnalyze();
+                                        }
+                                    }}
                                     placeholder="例如：我要一个价值500的礼盒，包含三个产品，整体折扣率低于70%，产品分别是移动电源、自拍杆、数据线，其中移动电源价值不低于300"
                                 />
+                                {/* 示例需求预填（Pre-filled Example Content） */}
+                                <div className="query-examples" style={{ marginTop: 8 }}>
+                                    {[
+                                        '我要一个价值500的礼盒，包含三个产品，整体折扣率低于70%，产品分别是移动电源、自拍杆、数据线，其中移动电源价值不低于300',
+                                        '价值800左右的开业礼篮：吹风机、剃须刀、保温杯各一件，折扣率越低越好',
+                                    ].map((ex) => (
+                                        <Button
+                                            key={ex}
+                                            type="dashed"
+                                            size="small"
+                                            className="query-example-tag"
+                                            onClick={() => updateState({ aiText: ex })}
+                                        >
+                                            试试示例：{ex.slice(0, 22)}…
+                                        </Button>
+                                    ))}
+                                </div>
                                 <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
                                     点击「生成组合方案」后，AI 将自动解析总价、三级品类、价格/折扣率限制并生成方案（需在右上角用户菜单配置 API Key）
                                 </Text>
@@ -848,14 +873,14 @@ export default function SolutionPage() {
                                         transition: 'grid-template-rows 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
                                     }}>
                                         <div style={{ overflow: 'hidden', minHeight: 0 }}>
-                                            <div style={{ padding: '0 10px 10px', borderTop: '1px solid #f0f0f0' }}>
+                                            <div style={{ padding: '0 10px 10px', borderTop: '1px solid var(--ink-100)' }}>
                                             {slots.map((slot, idx) => (
                                                 <div key={idx} style={{
-                                                    border: '1px solid #f0f0f0',
+                                                    border: '1px solid var(--ink-100)',
                                                     borderRadius: 6,
                                                     marginTop: 8,
                                                     padding: '8px 10px',
-                                                    background: '#fff',
+                                                    background: 'var(--surface)',
                                                 }}>
                                                     {/* 单行：产品品类 + 数量 + 价格 + 折扣率 + 删除（窄屏自动换行） */}
                                                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -960,13 +985,13 @@ export default function SolutionPage() {
                                 />
                             </span>
                         </Space>
-                        <div style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
+                        <div style={{ color: 'var(--ink-400)', fontSize: 12, marginTop: 8 }}>
                             {aiMode
                                 ? '提示：输入自然语言需求即可，例如「总价500左右，含移动电源、自拍杆各一个，整体折扣率低于70%」'
                                 : '提示：总价必填；三级品类与数量必填；价格、折扣率限制可选。点击「添加商品」可添加更多商品'}
                         </div>
                         {result?.tokens_used ? (
-                            <div style={{ marginTop: 4, color: '#7c3aed', fontSize: 12 }}>
+                            <div style={{ marginTop: 4, color: 'var(--accent-purple)', fontSize: 12 }}>
                                 本次分析消耗 <strong>{result.tokens_used}</strong> tokens
                             </div>
                         ) : null}
@@ -989,7 +1014,14 @@ export default function SolutionPage() {
                             <>
                                 <div style={{ marginBottom: 8 }}>
                                     <Input placeholder="方案名称（可选）" value={solutionName}
-                                        onChange={e => updateState({ solutionName: e.target.value })} size="small" />
+                                        onChange={e => {
+                                            updateState({ solutionName: e.target.value });
+                                            // 同步编辑内容到标题（Sync Editing Content to Title）
+                                            document.title = e.target.value.trim()
+                                                ? `方案：${e.target.value.trim()} · 智能报价`
+                                                : '智能报价 · 让每一次报价恰到好处';
+                                        }}
+                                        size="small" />
                                 </div>
                                 <Divider style={{ margin: '8px 0' }} />
                                 <div style={{ marginBottom: 8 }}>
@@ -1021,10 +1053,10 @@ export default function SolutionPage() {
                                         transition: 'grid-template-rows 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
                                     }}>
                                         <div style={{ overflow: 'hidden', minHeight: 0 }}>
-                                            <div style={{ padding: '0 10px', background: '#fff', borderTop: '1px solid #f0f0f0' }}>
+                                            <div style={{ padding: '0 10px', background: 'var(--surface)', borderTop: '1px solid var(--ink-100)' }}>
                                                 {selectedSolution.items.map((item, idx) => (
                                                     <div key={idx} style={{
-                                                        padding: '6px 0', borderBottom: idx < selectedSolution.items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                                                        padding: '6px 0', borderBottom: idx < selectedSolution.items.length - 1 ? '1px solid var(--ink-100)' : 'none',
                                                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                                     }}>
                                                         <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -1033,13 +1065,13 @@ export default function SolutionPage() {
                                                                     {item.product_name || item.quick_model}
                                                                 </div>
                                                             </Tooltip>
-                                                            <div style={{ fontSize: 12, color: '#999' }}>
+                                                            <div style={{ fontSize: 12, color: 'var(--ink-400)' }}>
                                                                 {item.quick_model} | {item.brand} | {item.category_level1} | ¥{item.price.toFixed(2)}
                                                             </div>
                                                         </div>
                                                         <div style={{ textAlign: 'right', minWidth: 80 }}>
                                                             <div className="dd-amount" style={{ fontSize: 13 }}>¥{item.subtotal.toFixed(2)}</div>
-                                                            <div style={{ fontSize: 11, color: '#999' }}>×{item.quantity}</div>
+                                                            <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>×{item.quantity}</div>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -1068,8 +1100,8 @@ export default function SolutionPage() {
                                 )}
                             </>
                         ) : (
-                            <div style={{ color: '#999', textAlign: 'center', padding: '40px 0' }}>
-                                <ShoppingCartOutlined style={{ fontSize: 48, color: '#d9d9d9', display: 'block', marginBottom: 16 }} />
+                            <div style={{ color: 'var(--ink-400)', textAlign: 'center', padding: '40px 0' }}>
+                                <ShoppingCartOutlined style={{ fontSize: 48, color: 'var(--ink-300)', display: 'block', marginBottom: 16 }} />
                                 <Text type="secondary">请先生成方案，然后选择一个方案查看详情</Text>
                             </div>
                         )}
@@ -1091,8 +1123,8 @@ export default function SolutionPage() {
                             className="dd-diagnosis-card dd-fade-up"
                             style={{
                                 marginBottom: 12,
-                                border: '1px solid #e4d5f7',
-                                background: 'linear-gradient(135deg, #faf5ff 0%, #f5f7ff 100%)',
+                                border: '1px solid var(--accent-purple-border)',
+                                background: 'linear-gradient(135deg, var(--accent-purple-bg) 0%, var(--accent-indigo-bg) 100%)',
                             }}
                         >
                             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
@@ -1106,7 +1138,7 @@ export default function SolutionPage() {
                                     <RobotOutlined />
                                 </div>
                                 <div>
-                                    <Text strong style={{ fontSize: 15, color: '#5b21b6', display: 'block' }}>
+                                    <Text strong style={{ fontSize: 15, color: 'var(--accent-purple)', display: 'block' }}>
                                         🤖 智能方案诊断
                                     </Text>
                                     <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1122,14 +1154,14 @@ export default function SolutionPage() {
                                     return (
                                         <div key={idx} style={{
                                             padding: '8px 12px', marginBottom: 8,
-                                            background: 'rgba(255,255,255,0.92)', borderRadius: 10,
-                                            borderLeft: '3px solid #7c3aed',
+                                            background: 'var(--surface)', borderRadius: 10,
+                                            borderLeft: '3px solid var(--accent-purple)',
                                             boxShadow: '0 1px 3px rgba(124,58,237,0.08)',
                                         }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
                                                 <Tag color="purple" style={{ marginRight: 6 }}>诊断 {idx + 1}</Tag>
-                                                <Text strong style={{ color: '#5b21b6' }}>{d.title}</Text>
+                                                <Text strong style={{ color: 'var(--accent-purple)' }}>{d.title}</Text>
                                             </div>
                                             {hasApplyBtn && (
                                                 <Button
@@ -1139,7 +1171,7 @@ export default function SolutionPage() {
                                                     style={{
                                                         flexShrink: 0,
                                                         marginLeft: 8,
-                                                        background: 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)',
+                                                        background: 'linear-gradient(135deg, var(--accent-purple) 0%, #8b5cf6 100%)',
                                                         border: 'none',
                                                         color: '#fff',
                                                         fontWeight: 600,
@@ -1150,15 +1182,15 @@ export default function SolutionPage() {
                                                 </Button>
                                             )}
                                         </div>
-                                        <div style={{ color: '#595959', marginBottom: 4 }}>{d.detail}</div>
+                                        <div style={{ color: 'var(--ink-500)', marginBottom: 4 }}>{d.detail}</div>
                                         <div>
-                                            <BulbOutlined style={{ color: '#faad14', marginRight: 6 }} />
-                                            <Text strong style={{ color: '#389e0d' }}>建议：</Text>
-                                            <Text style={{ color: '#389e0d' }}>{d.suggestion}</Text>
+                                            <BulbOutlined style={{ color: 'var(--accent-amber)', marginRight: 6 }} />
+                                            <Text strong style={{ color: 'var(--accent-green)' }}>建议：</Text>
+                                            <Text style={{ color: 'var(--accent-green)' }}>{d.suggestion}</Text>
                                         </div>
                                         {isCategoryPick && adj?.slot_index != null && (
                                             <div style={{ marginTop: 6, display: 'flex', alignItems: 'center' }}>
-                                                <Text style={{ marginRight: 8, color: '#5b21b6', flexShrink: 0 }}>更换为：</Text>
+                                                <Text style={{ marginRight: 8, color: 'var(--accent-purple)', flexShrink: 0 }}>更换为：</Text>
                                                 <Select
                                                     showSearch
                                                     size="small"
@@ -1218,7 +1250,7 @@ export default function SolutionPage() {
                                     按价格 {sortOrder === 'asc' ? '升序' : sortOrder === 'desc' ? '降序' : '智能'}
                                 </Button>
                             </div>
-                            <div className="dd-fade-up dd-stagger" style={{ maxHeight: 600, overflowY: 'auto' }}>
+                            <div className="dd-fade-up dd-stagger dd-fade-edge" style={{ maxHeight: 600, overflowY: 'auto' }}>
                                 {result.solutions.map((sol: SolutionCombination, idx: number) => (
                                     <Card
                                         key={idx}
@@ -1227,7 +1259,7 @@ export default function SolutionPage() {
                                         style={{
                                             marginBottom: 12,
                                             cursor: 'pointer',
-                                            background: selectedSolutionIdx === idx ? '#fafaf9' : '#fff',
+                                            background: selectedSolutionIdx === idx ? 'var(--ink-50)' : 'var(--surface)',
                                         }}
                                         onClick={() => selectSolution(idx)}
                                         title={
@@ -1257,7 +1289,7 @@ export default function SolutionPage() {
                                                         <Text strong style={{ float: 'right' }}>合计：</Text>
                                                     </Table.Summary.Cell>
                                                     <Table.Summary.Cell index={1}>
-                                                        <Text strong style={{ color: '#cf1322' }}>¥{sol.total_price.toFixed(2)}</Text>
+                                                        <Text strong style={{ color: 'var(--accent-red)' }}>¥{sol.total_price.toFixed(2)}</Text>
                                                     </Table.Summary.Cell>
                                                 </Table.Summary.Row>
                                             )}
@@ -1299,7 +1331,7 @@ export default function SolutionPage() {
                         className="dd-recommend-card dd-fade-up"
                         title={
                             <Space>
-                                <ShopOutlined style={{ color: '#16a34a' }} />
+                                <ShopOutlined style={{ color: 'var(--accent-green)' }} />
                                 <span style={{ fontWeight: 600 }}>推荐方案</span>
                                 <Tag color="success" style={{ borderRadius: 999 }}>来自其他公司</Tag>
                                 <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
@@ -1307,14 +1339,14 @@ export default function SolutionPage() {
                                 </Typography.Text>
                             </Space>
                         }
-                        style={{ background: 'linear-gradient(135deg, #f6fef8 0%, #fff 100%)', border: '1px solid #c9ebd2', marginTop: 8 }}
+                        style={{ background: 'linear-gradient(135deg, var(--accent-green-bg) 0%, var(--surface) 100%)', border: '1px solid var(--accent-green-border)', marginTop: 8 }}
                     >
                         <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                             {recommendedSolutions.map((sol: any, idx: number) => (
                                 <Card
                                     key={idx}
                                     size="small"
-                                    style={{ marginBottom: 8, border: '1px solid #d9f7be' }}
+                                    style={{ marginBottom: 8, border: '1px solid var(--accent-green-border)' }}
                                     title={
                                         <Space>
                                             <Text strong>推荐方案 {idx + 1}</Text>
@@ -1336,7 +1368,7 @@ export default function SolutionPage() {
                                             { title: '品牌', dataIndex: 'brand', key: 'brand', width: 70 },
                                             { title: '单价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => `¥${v?.toFixed(2) || '0.00'}` },
                                             { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 50 },
-                                            { title: '小计', dataIndex: 'subtotal', key: 'subtotal', width: 80, render: (v: number) => <span style={{ color: '#cf1322' }}>¥{v?.toFixed(2) || '0.00'}</span> },
+                                            { title: '小计', dataIndex: 'subtotal', key: 'subtotal', width: 80, render: (v: number) => <span style={{ color: 'var(--accent-red)' }}>¥{v?.toFixed(2) || '0.00'}</span> },
                                         ]}
                                         rowKey="product_id"
                                         size="small"
@@ -1366,7 +1398,7 @@ export default function SolutionPage() {
                                 </Typography.Text>
                             </Space>
                         }
-                        style={{ background: 'linear-gradient(135deg, #fffdf5 0%, #fff 100%)', border: '1px solid #f3e3b2', marginTop: 8 }}
+                        style={{ background: 'linear-gradient(135deg, var(--accent-amber-bg) 0%, var(--surface) 100%)', border: '1px solid var(--accent-amber-border)', marginTop: 8 }}
                     >
                         <Table
                             dataSource={recommendedProducts}
@@ -1385,12 +1417,12 @@ export default function SolutionPage() {
                                         const src = r.image.startsWith('data:') ? r.image : `data:image/png;base64,${r.image}`;
                                         return (
                                             <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
-                                                <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+                                                <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--ink-100)', cursor: 'pointer' }} />
                                             </Tooltip>
                                         );
                                     },
                                 },
-                                { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => <span style={{ color: '#cf1322', fontWeight: 600 }}>¥{Number(v).toFixed(2)}</span> },
+                                { title: '代发价', dataIndex: 'price', key: 'price', width: 80, render: (v: number) => <span style={{ color: 'var(--accent-red)', fontWeight: 600 }}>¥{Number(v).toFixed(2)}</span> },
                                 {
                                     title: '来源公司', dataIndex: 'source_company_name', key: 'source_company_name', width: 120,
                                     render: (v: string, r: RecommendedProduct) => (

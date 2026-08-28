@@ -213,18 +213,18 @@ export default function ImportDialog({ open, onClose, onSuccess }: Props) {
                                     onClick={() => setActiveFileId(item.result.file_id)}
                                     style={{
                                         cursor: 'pointer',
-                                        background: isActive ? '#e6f4ff' : undefined,
+                                        background: isActive ? 'var(--accent-indigo-bg)' : undefined,
                                         borderRadius: 4,
                                         padding: '6px 12px',
                                     }}
                                     extra={
-                                        isActive ? <RightCircleOutlined style={{ color: '#1677ff' }} /> : null
+                                        isActive ? <RightCircleOutlined style={{ color: 'var(--accent-indigo)' }} /> : null
                                     }
                                 >
                                     <List.Item.Meta
                                         avatar={<FileOutlined />}
                                         title={
-                                            <Text strong={isActive} style={{ color: isActive ? '#1677ff' : undefined }}>
+                                            <Text strong={isActive} style={{ color: isActive ? 'var(--accent-indigo)' : undefined }}>
                                                 {fname}
                                             </Text>
                                         }
@@ -305,9 +305,9 @@ export default function ImportDialog({ open, onClose, onSuccess }: Props) {
                         subTitle={
                             <span>
                                 共 {importResult.total_rows} 条，
-                                成功 <CheckCircleOutlined style={{ color: '#52c41a' }} /> {importResult.success_rows} 条，
+                                成功 <CheckCircleOutlined style={{ color: 'var(--accent-green)' }} /> {importResult.success_rows} 条，
                                 跳过 {importResult.skip_rows} 条，
-                                失败 <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> {importResult.error_rows} 条
+                                失败 <CloseCircleOutlined style={{ color: 'var(--accent-red)' }} /> {importResult.error_rows} 条
                             </span>
                         }
                     />

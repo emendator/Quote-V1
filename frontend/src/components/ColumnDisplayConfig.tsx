@@ -82,8 +82,8 @@ export default function ColumnDisplayConfig({ open, pageType, title, onClose, on
         dropIndex.current = index;
         // 视觉反馈：设置拖拽经过行的样式（通过 data 属性）
         const target = e.currentTarget as HTMLElement;
-        target.style.borderTop = index < (dragIndex.current ?? -1) ? '2px solid #1677ff' : '';
-        target.style.borderBottom = index > (dragIndex.current ?? -1) ? '2px solid #1677ff' : '';
+        target.style.borderTop = index < (dragIndex.current ?? -1) ? '2px solid var(--accent-indigo)' : '';
+        target.style.borderBottom = index > (dragIndex.current ?? -1) ? '2px solid var(--accent-indigo)' : '';
     };
 
     const handleDragLeave = (e: React.DragEvent) => {
@@ -178,7 +178,7 @@ export default function ColumnDisplayConfig({ open, pageType, title, onClose, on
             key: 'drag',
             width: 50,
             render: () => (
-                <span style={{ cursor: 'grab', color: '#999', fontSize: 16 }}>
+                <span style={{ cursor: 'grab', color: 'var(--ink-400)', fontSize: 16 }}>
                     <HolderOutlined />
                 </span>
             ),
@@ -217,7 +217,7 @@ export default function ColumnDisplayConfig({ open, pageType, title, onClose, on
             dataIndex: 'defaultLabel',
             key: 'defaultLabel',
             width: 120,
-            render: (v: string) => <span style={{ color: '#999' }}>{v}</span>,
+            render: (v: string) => <span style={{ color: 'var(--ink-400)' }}>{v}</span>,
         },
         {
             title: '显示',
@@ -283,7 +283,7 @@ export default function ColumnDisplayConfig({ open, pageType, title, onClose, on
                     style: { cursor: 'default' },
                 })}
             />
-            <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: 'var(--ink-400)', fontSize: 12 }}>
                 提示：拖动行前的 ≡ 图标可调整列顺序；关闭「显示」开关可隐藏该列；
                 修改「表头名称」可自定义列名；「列宽」单位为像素。修改保存后立即生效。
             </div>

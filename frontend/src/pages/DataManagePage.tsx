@@ -37,8 +37,9 @@ export default function DataManagePage() {
     });
     const { page, pageSize, keyword, category, zoom, sortBy, sortOrder } = pageState;
     const updateState = useCallback((patch: Partial<typeof pageState>) => {
-        setPageState({ ...pageState, ...patch });
-    }, [pageState, setPageState]);
+        // 函数式更新：始终基于最新状态合并，避免异步回调用旧闭包覆盖新状态
+        setPageState(prev => ({ ...prev, ...patch }));
+    }, [setPageState]);
 
     // 表单弹窗
     const [formOpen, setFormOpen] = useState(false);

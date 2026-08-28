@@ -179,14 +179,14 @@ export default function ProductTable({
                                                 whiteSpace: 'nowrap',
                                                 verticalAlign: 'middle',
                                             }}>
-                                                {opt === '' ? <span style={{ color: '#999' }}>(空白)</span> : opt}
+                                                {opt === '' ? <span style={{ color: 'var(--ink-400)' }}>(空白)</span> : opt}
                                             </span>
                                         </Tooltip>
                                     </Checkbox>
                                 </div>
                             ))}
                             {filteredOptions.length === 0 && (
-                                <div style={{ color: '#999', padding: '8px 0', textAlign: 'center' }}>无匹配选项</div>
+                                <div style={{ color: 'var(--ink-400)', padding: '8px 0', textAlign: 'center' }}>无匹配选项</div>
                             )}
                         </div>
                         <Divider style={{ margin: '6px 0' }} />
@@ -246,7 +246,7 @@ export default function ProductTable({
             ...col,
             filterDropdown: renderFilterDropdown(dataIndex),
             filterIcon: (filtered: boolean) => (
-                <FilterFilled style={{ color: filtered || isFiltered(dataIndex) ? '#1677ff' : undefined, fontSize: 12 }} />
+                <FilterFilled style={{ color: filtered || isFiltered(dataIndex) ? 'var(--accent-indigo)' : undefined, fontSize: 12 }} />
             ),
             filteredValue: columnFilters[dataIndex] || null,
             onFilter: (value, record) => {
@@ -269,12 +269,12 @@ export default function ProductTable({
                 width: 65,
                 render: (v: string) => {
                     if (!v || v === '') {
-                        return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
+                        return <span style={{ color: 'var(--ink-300)', fontSize: 12 }}>无图</span>;
                     }
                     const src = v.startsWith('data:') ? v : `data:image/png;base64,${v}`;
                     return (
                         <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
-                            <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+                            <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--ink-100)', cursor: 'pointer' }} />
                         </Tooltip>
                     );
                 },

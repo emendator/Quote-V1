@@ -52,8 +52,9 @@ export default function HomePage() {
     const { filterCat1, filterBrand, filterCat2, filterCat3, filterPrice, filterNego, filterPurchase, filterRetail, filterDiscount } = pageState;
 
     const updateState = useCallback((patch: Partial<typeof pageState>) => {
-        setPageState({ ...pageState, ...patch });
-    }, [pageState, setPageState]);
+        // 函数式更新：始终基于最新状态合并，避免异步回调用旧闭包覆盖新状态
+        setPageState(prev => ({ ...prev, ...patch }));
+    }, [setPageState]);
 
     // 推荐产品
     const [recommendedProducts, setRecommendedProducts] = useState<RecommendedProduct[]>([]);
@@ -486,7 +487,7 @@ export default function HomePage() {
                                 </Typography.Text>
                             </Space>
                         }
-                        style={{ background: 'linear-gradient(135deg, #fffdf5 0%, #fff 100%)', border: '1px solid #f3e3b2', marginTop: 8 }}
+                        style={{ background: 'linear-gradient(135deg, var(--accent-amber-bg) 0%, var(--surface) 100%)', border: '1px solid var(--accent-amber-border)', marginTop: 8 }}
                     >
                         <Table
                             dataSource={recommendedProducts}
@@ -501,11 +502,11 @@ export default function HomePage() {
                                 {
                                     title: '图片', key: 'image', width: 65,
                                     render: (_: unknown, r: RecommendedProduct) => {
-                                        if (!r.image) return <span style={{ color: '#ccc', fontSize: 12 }}>无图</span>;
+                                        if (!r.image) return <span style={{ color: 'var(--ink-300)', fontSize: 12 }}>无图</span>;
                                         const src = r.image.startsWith('data:') ? r.image : `data:image/png;base64,${r.image}`;
                                         return (
                                             <Tooltip title={<img src={src} style={{ maxWidth: 300, maxHeight: 300 }} alt="预览" />}>
-                                                <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', cursor: 'pointer' }} />
+                                                <img src={src} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--ink-100)', cursor: 'pointer' }} />
                                             </Tooltip>
                                         );
                                     },
@@ -519,7 +520,7 @@ export default function HomePage() {
                                 },
                             ]}
                         />
-                        <div style={{ textAlign: 'center', marginTop: 8, color: '#999', fontSize: 12 }}>
+                        <div style={{ textAlign: 'center', marginTop: 8, color: 'var(--ink-400)', fontSize: 12 }}>
                             如需购买推荐商品，请加入方案后，在「智能方案」页保存时按提示联系对应公司
                         </div>
                     </Card>

@@ -15,6 +15,7 @@ interface Props {
 /** 3D 翻转卡：正面登录 / 背面注册，点击「立即注册 / 前往登录」翻转 */
 export default function AuthFlipCard({ initialSide = 'login' }: Props) {
     const [flipped, setFlipped] = useState(initialSide === 'register');
+    const [shaking, setShaking] = useState(false);
     const [loginForm] = Form.useForm();
     const [regForm] = Form.useForm();
 
@@ -26,6 +27,12 @@ export default function AuthFlipCard({ initialSide = 'login' }: Props) {
 
     const { login, guestLogin, register, user } = useAuth();
     const navigate = useNavigate();
+
+    // 失败抖动反馈（Screen Shaking Feedback）：登录/游客失败时卡片摇一摇
+    const shake = () => {
+        setShaking(true);
+        window.setTimeout(() => setShaking(false), 460);
+    };
 
     // 如果已登录，跳转首页
     useEffect(() => {
@@ -43,6 +50,7 @@ export default function AuthFlipCard({ initialSide = 'login' }: Props) {
             navigate('/', { replace: true });
         } catch (err: any) {
             message.error(err.message || '登录失败');
+            shake();
         } finally {
             setLoginLoading(false);
         }
@@ -57,6 +65,7 @@ export default function AuthFlipCard({ initialSide = 'login' }: Props) {
             navigate('/', { replace: true });
         } catch (err: any) {
             message.error(err.message || '游客登录失败');
+            shake();
         } finally {
             setGuestLoading(false);
         }
@@ -106,7 +115,7 @@ export default function AuthFlipCard({ initialSide = 'login' }: Props) {
     };
 
     return (
-        <div className="dd-flip-card dd-blur-reveal">
+        <div className={`dd-flip-card dd-blur-reveal ${shaking ? 'dd-shake' : ''}`}>
             <div className={`dd-flip-inner ${flipped ? 'is-flipped' : ''}`}>
                 {/* ============ 正面：登录 ============ */}
                 <div className="dd-flip-face auth-card">

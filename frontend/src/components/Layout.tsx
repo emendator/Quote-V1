@@ -18,8 +18,11 @@ import {
     ThunderboltOutlined,
     SafetyOutlined,
     DownOutlined,
+    SunOutlined,
+    MoonOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../store/AuthContext';
+import { useTheme } from '../store/ThemeContext';
 import { changePassword, updateApiKey, changeCompanyPassword } from '../services/api';
 
 const { Header, Sider, Content } = Layout;
@@ -46,6 +49,7 @@ export default function AppLayout() {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, logout, isSuperAdmin, isAdmin, isGuest, refreshUser } = useAuth();
+    const { mode, toggleTheme } = useTheme();
     const [cartCount, setCartCount] = useState(getCartCount);
     const [pwdModalOpen, setPwdModalOpen] = useState(false);
 
@@ -234,7 +238,7 @@ export default function AppLayout() {
             <Sider
                 width={216}
                 className={siderCollapsed ? 'dd-sider dd-sider-collapsed' : 'dd-sider'}
-                style={{ background: '#fff', borderRight: '1px solid var(--ink-100)' }}
+                style={{ background: 'var(--surface)', borderRight: '1px solid var(--ink-100)' }}
                 collapsible
                 collapsed={siderCollapsed}
                 onCollapse={(value) => {
@@ -280,7 +284,7 @@ export default function AppLayout() {
                         color: 'var(--ink-400)',
                         fontSize: 15,
                         transition: 'all 0.2s',
-                        background: '#fff',
+                        background: 'var(--surface)',
                     }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--ink-900)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ink-400)'; }}
@@ -301,16 +305,26 @@ export default function AppLayout() {
                         <span className="eyebrow dd-title-stagger">{pageMeta.eyebrow}</span>
                         <h2 className="dd-title-stagger" style={{ animationDelay: '0.07s' }}>{pageMeta.title}</h2>
                     </div>
-                    <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-                        <Space className="dd-user-chip">
-                            <Avatar icon={<UserOutlined />} size={30} style={{ backgroundColor: 'var(--ink-800)' }} />
-                            <span style={{ fontWeight: 550, fontSize: 13.5, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {user?.username}
-                            </span>
-                            <Tag color={roleColor} style={{ fontSize: 11, lineHeight: '18px', padding: '0 7px', margin: 0, borderRadius: 999 }}>{roleLabel}</Tag>
-                            <DownOutlined style={{ fontSize: 10, color: 'var(--ink-400)' }} />
-                        </Space>
-                    </Dropdown>
+                    <Space size={12}>
+                        <Button
+                            type="text"
+                            className="dd-theme-toggle"
+                            aria-label={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+                            title={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+                            icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
+                            onClick={toggleTheme}
+                        />
+                        <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+                            <Space className="dd-user-chip">
+                                <Avatar icon={<UserOutlined />} size={30} style={{ backgroundColor: 'var(--ink-800)' }} />
+                                <span style={{ fontWeight: 550, fontSize: 13.5, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {user?.username}
+                                </span>
+                                <Tag color={roleColor} style={{ fontSize: 11, lineHeight: '18px', padding: '0 7px', margin: 0, borderRadius: 999 }}>{roleLabel}</Tag>
+                                <DownOutlined style={{ fontSize: 10, color: 'var(--ink-400)' }} />
+                            </Space>
+                        </Dropdown>
+                    </Space>
                 </Header>
                 <Content key={location.pathname} className="dd-content" style={{ overflow: 'auto' }}>
                     {isGuest && (

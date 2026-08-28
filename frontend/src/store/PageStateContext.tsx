@@ -42,7 +42,7 @@ export function PageStateProvider({ children }: { children: React.ReactNode }) {
     );
 }
 
-export function usePageState<T>(pageKey: string, defaults: T): [T, (state: T) => void] {
+export function usePageState<T>(pageKey: string, defaults: T): [T, (state: T | ((prev: T) => T)) => void] {
     const ctx = useContext(PageStateContext);
     if (!ctx) {
         throw new Error('usePageState must be used within PageStateProvider');
@@ -52,10 +52,16 @@ export function usePageState<T>(pageKey: string, defaults: T): [T, (state: T) =>
     const [state, setState] = useState<T>(() => ctx.getState(pageKey, defaults));
 
     const saveState = useCallback(
-        (newState: T) => {
+        (newState: T | ((prev: T) => T)) => {
             // 同时更新 ref（跨页面持久）和本地 state（触发重渲染）
-            ctx.setState(pageKey, newState as unknown as PageState);
-            setState(newState);
+            // 支持函数式更新，避免异步回调用旧闭包覆盖新状态
+            setState((prev) => {
+                const next = typeof newState === 'function'
+                    ? (newState as (p: T) => T)(prev)
+                    : newState;
+                ctx.setState(pageKey, next as unknown as PageState);
+                return next;
+            });
         },
         [ctx, pageKey],
     );
