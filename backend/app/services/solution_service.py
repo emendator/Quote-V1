@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import text
 from app.database import sync_engine
 from app.services.api_key_service import call_deepseek_with_user_key
+from app.services.combination_engine import is_any_category
 from app.utils.excel_utils import add_image_embedded_in_cell, normalize_datetime_string
 
 logger = logging.getLogger("solution_service")
@@ -58,7 +59,7 @@ JSON 格式：
 - "xx以下/以内/不超过/低于/最多" → price_op="lt"；"xx以上/不低于/至少/超过" → price_op="gt"；"xx左右/上下/大概/约" → price_op="around"
 - 总价："总价不超过X" → total_price_op="lt"；"总价不低于X" → "gt"；"总价X左右/大约" → "around"
 - 折扣率同理用 discount_op / discount（百分比数字）
-- "随意/都可以/任意" 表示该位置无价格/折扣约束（price_op=""，price=null）
+- "随意/都可以/任意/任意商品" 表示该位置是"任意商品"槽位：category 填 ""（或 "任意商品"），且无价格/折扣约束（price_op=""，price=null）；不要把它当作真实三级品类
 - 品类必须从参考数据 category_level3 列表中精确匹配（把用户口语化表达映射到最接近的三级品类）
 - 如果需求没有明确总价，total_price 用 null；无折扣率则 max_discount_rate / max_discount_op 用 null
 - 只返回 JSON，不要额外解释
@@ -265,7 +266,10 @@ class SolutionService:
         # 如果找到了品类，为每个品类创建槽位
         if cats:
             for i, cat in enumerate(cats):
-                slot: Dict[str, Any] = {"category": cat}
+                slot: Dict[str, Any] = {}
+                # "任意/随意/都可以/商品"等表示"任意商品"，不写入品类
+                if not is_any_category(cat):
+                    slot["category"] = cat
                 # 为该品类查找紧密关联的价格约束
                 # 只匹配"品类名(价值)不低于/不超过XXX"这种紧邻的约束，不会误读到其他品类的条件
                 price_min_m = re.search(
@@ -342,6 +346,9 @@ class SolutionService:
         for slot in slots:
             qty = max(1, int(getattr(slot, "quantity", 1) or 1))
             cat = (getattr(slot, "category", "") or "").strip()
+            # "任意/随意/都可以/商品" 等表示"任意商品"，不应作为真实品类查询
+            if is_any_category(cat):
+                cat = ""
             price_min = getattr(slot, "price_min", None)
             price_max = getattr(slot, "price_max", None)
             price_op = (getattr(slot, "price_op", "") or "").strip()
@@ -539,6 +546,22 @@ class SolutionService:
             elif op == "gt":
                 items[idx]["discount_min"] = value
                 items[idx].pop("discount_max", None)
+        elif field == "quantity" and idx is not None and 0 <= idx < len(items):
+            try:
+                target = max(1, int(value))
+            except (TypeError, ValueError):
+                target = 1
+            def _it_sig(it):
+                return (it.get("category_level3"), it.get("category"), it.get("brand"), it.get("specification"),
+                        it.get("price_min"), it.get("price_max"), it.get("discount_min"), it.get("discount_max"))
+            base_sig = _it_sig(items[idx])
+            end = idx
+            while end + 1 < len(items) and _it_sig(items[end + 1]) == base_sig:
+                end += 1
+            group_size = end - idx + 1
+            if group_size > target:
+                # 同一商品信息块按数量展开为多个相同槽位，减少数量 = 删除该组末尾多余的槽位
+                del items[idx + target:end + 1]
         elif field == "remove_last_slot" and len(items) > 1:
             items.pop()
         return c

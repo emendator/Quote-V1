@@ -326,8 +326,8 @@ export interface SolutionCombination {
 
 /** 智能方案一键调整参数（由后端诊断给出，前端据此应用建议） */
 export interface SolutionAdjust {
-    /** 调整字段：总价 / 总折扣率 / 某商品的价格 / 折扣率 / 品类 / 移除最后一个商品 / AI模式直接覆盖需求文本 */
-    field: 'total_price' | 'total_discount' | 'price' | 'discount' | 'category' | 'remove_last_slot' | 'requirement';
+    /** 调整字段：总价 / 总折扣率 / 某商品的价格 / 折扣率 / 数量 / 品类 / 移除最后一个商品 / AI模式直接覆盖需求文本 */
+    field: 'total_price' | 'total_discount' | 'price' | 'discount' | 'quantity' | 'category' | 'remove_last_slot' | 'requirement';
     /** 商品槽位索引（商品级调整时有效） */
     slot_index?: number;
     /** 建议值（AI 模式覆盖需求文本时为字符串） */
@@ -338,7 +338,7 @@ export interface SolutionAdjust {
 
 /** 智能方案无方案诊断条目 */
 export interface SolutionDiagnosis {
-    /** 诊断类型：total_price / total_discount / slot_price / slot_discount / empty_slot / insufficient / general */
+    /** 诊断类型：total_price / total_discount / slot_price / slot_discount / slot_attr / empty_slot / slot_quantity / assignment / general */
     type: string;
     /** 诊断标题（如"第 1 个品类「耳机」价格上限过低"） */
     title: string;

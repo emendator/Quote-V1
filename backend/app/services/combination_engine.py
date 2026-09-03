@@ -1,11 +1,32 @@
 """组合方案生成引擎 —— 枚举所有满足约束条件的产品组合方案"""
 import logging
 import itertools
+import difflib
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import text
 from app.database import sync_engine
 
 logger = logging.getLogger("combination_engine")
+
+# 表示"任意/不限"的商品品类关键词（用于正确识别"任意商品/随意/都可以"等，不应作为真实品类查询）
+ARBITRARY_CATEGORY_KEYWORDS = ("任意", "随意", "随便", "都可以", "不限", "任何", "什么都", "全品类",
+                             "任意商品", "任意产品", "任何商品", "任何产品", "商品", "全部")
+
+
+def is_any_category(cat: Optional[str]) -> bool:
+    """判断某个品类字符串是否表示"任意/不限"（不是真实品类）。"""
+    if not cat:
+        return True
+    s = cat.strip().replace(" ", "").replace("\u3000", "")
+    if not s:
+        return True
+    if s in ("商品", "全部", "全品类", "不限", "不限品类", "任意", "任意商品", "任意产品",
+             "随意", "随便", "都可以", "任何", "任何商品", "任何产品"):
+        return True
+    if s in ARBITRARY_CATEGORY_KEYWORDS:
+        return True
+    return any(kw in s for kw in ("任意", "随意", "随便", "都可以", "不限", "任何", "什么都", "全品类"))
+
 
 # ========== 约束解析结果结构 ==========
 # {
@@ -177,7 +198,7 @@ class CombinationEngine:
         seen_signatures = set()  # 用于去重
         for combo in itertools.product(*slot_candidates):
             combo_list = list(combo)
-            # 同一组合内商品不重复（礼盒搭配场景更合理）
+            # 同一组合内商品不重复（数量代表"需几件不同商品"，同一商品不能重复使用）
             product_ids = [p.get("id") for p in combo_list]
             if len(set(product_ids)) != len(product_ids):
                 continue
@@ -328,6 +349,7 @@ class CombinationEngine:
 
         for combo in itertools.product(*cands):
             combo_list = list(combo)
+            # 与真实枚举一致：组合内商品必须互不相同
             product_ids = [p.get("id") for p in combo_list]
             if len(set(product_ids)) != len(product_ids):
                 continue
@@ -357,6 +379,61 @@ class CombinationEngine:
                 stats["max_discount"] = avg_discount
         return stats
 
+    @staticmethod
+    def _has_distinct_assignment(candidate_sets: List[set]) -> bool:
+        """判断是否能为每个槽位分配一个互不相同的商品（二分图最大匹配）。
+
+        组合内商品必须互不相同：若无法为所有槽位找到一组互不相同的商品，
+        则无论总价/总折扣率如何放宽，都不可能组合出方案。
+        """
+        match_to_slot: Dict[int, int] = {}
+
+        def dfs(slot: int, visited: set) -> bool:
+            for pid in candidate_sets[slot]:
+                if pid in visited:
+                    continue
+                visited.add(pid)
+                if pid not in match_to_slot or dfs(match_to_slot[pid], visited):
+                    match_to_slot[pid] = slot
+                    return True
+            return False
+
+        for i in range(len(candidate_sets)):
+            if not dfs(i, set()):
+                return False
+        return True
+
+    def _similar_categories(self, cat: str, company_id: Optional[int] = None, top: int = 3) -> List[str]:
+        """模糊查找与给定品类最接近的数据库中已有三级品类，用于空槽位建议。
+
+        完全基于商品库实际数据（无硬编码）：优先匹配包含关系，再用相似度排序。
+        """
+        if not cat or not cat.strip():
+            return []
+        try:
+            sql = "SELECT DISTINCT category_level3 FROM products WHERE category_level3 IS NOT NULL AND TRIM(category_level3) != ''"
+            params = {}
+            if company_id:
+                sql += " AND company_id = :company_id"
+                params["company_id"] = company_id
+            with sync_engine.connect() as conn:
+                rows = conn.execute(text(sql), params).fetchall()
+        except Exception:
+            return []
+        names = [r[0] for r in rows if r[0]]
+        scored = []
+        cat_key = cat.replace(" ", "").replace("　", "")
+        for name in names:
+            name_key = name.replace(" ", "").replace("　", "")
+            if cat_key and (cat_key in name_key or name_key in cat_key):
+                score = 1.0
+            else:
+                score = difflib.SequenceMatcher(None, cat, name).ratio()
+            if score >= 0.3:
+                scored.append((score, name))
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        return [name for _, name in scored[:top]]
+
     def _diagnose_empty_slots(
         self,
         items_constraints: List[Dict[str, Any]],
@@ -378,12 +455,46 @@ class CombinationEngine:
             base_cands = self._query_candidates_for_slot(relaxed_slot, company_id, fuzzy=True)
 
             if not base_cands:
+                # 尝试仅保留品类条件，判断是品类无货，还是品牌/规格等附加限制导致
+                cat_only_slot = {k: v for k, v in slot.items() if k in ("category_level3", "category")}
+                cat_only_cands = self._query_candidates_for_slot(cat_only_slot, company_id, fuzzy=True) if cat_only_slot else []
+                if cat_only_cands:
+                    cond_names = []
+                    if slot.get("brand"):
+                        cond_names.append("品牌")
+                    if slot.get("specification"):
+                        cond_names.append("规格")
+                    if slot.get("keyword"):
+                        cond_names.append("商品名称关键词")
+                    cond_txt = "、".join(cond_names) if cond_names else "品牌/规格/商品名称关键词"
+                    diagnosis.append({
+                        "type": "slot_attr",
+                        "title": f"第 {i + 1} 个品类「{cat}」的{cond_txt}限制过严",
+                        "detail": (
+                            f"该品类本身有可用商品（{len(cat_only_cands)} 个），"
+                            f"但在当前{cond_txt}条件下没有匹配商品。"
+                        ),
+                        "suggestion": f"请去掉或放宽{cond_txt}限制，或更换{cond_txt}。",
+                    })
+                    continue
+
                 # 品类本身无匹配商品
+                suggestion = "更换品类，或检查该品类的商品数据。"
+                similar = self._similar_categories(cat, company_id)
+                if similar:
+                    suggestion = (
+                        f"该品类在商品库中可能不存在或名称不一致；"
+                        f"与目标最接近的三级品类有：{'、'.join(similar)}。"
+                        f"可考虑更换为其中之一，或检查该品类的商品数据。"
+                    )
                 diagnosis.append({
                     "type": "empty_slot",
                     "title": f"第 {i + 1} 个品类「{cat}」暂无可用商品",
-                    "detail": "该品类在商品库中未找到匹配商品。",
-                    "suggestion": "更换品类，或检查该品类的商品数据。",
+                    "detail": (
+                        f"该品类在商品库中未找到匹配商品（可能是品类名称与商品库中的三级品类不完全一致，"
+                        f"或该品类下暂未导入商品）。"
+                    ),
+                    "suggestion": suggestion,
                     "adjust": {"field": "category", "slot_index": i},
                 })
                 continue
@@ -465,7 +576,9 @@ class CombinationEngine:
         1. 总折扣率归因：放松总折扣率后若有组合 → 说明是总折扣率限制过严，给出可调整到的折扣率值；
         2. 总价归因：放松总价后若有组合 → 说明是总价限制过严，给出可调整到的总价值；
         3. 槽位归因：逐槽位对比"限制值 vs 该品类商品实际价格/折扣率范围"，定位过严的商品级约束；
-        4. 兜底：可选独立商品数量不足或无法组合时给出通用指引。
+        4. 数量归因：同一三级品类按数量展开成多个槽位时，若该品类可选的不同商品数 < 需求件数，说明"数量要求过高"导致无法组合出互不相同的商品；
+        5. 分配归因：对全部槽位做"互不相同商品"的最大匹配，若匹配无解，说明各槽位候选过小或相互重合，无法为每个槽位分配不同商品；
+        6. 兜底：若仍无法定位到单一冲突，给出各品类可选商品数量/约束的汇总，并指出最可能"卡脖子"的品类及具体放宽方向。
 
         返回 [{type, title, detail, suggestion}, ...]，供前端渲染"智能诊断"面板。
         """
@@ -607,29 +720,159 @@ class CombinationEngine:
         if diagnosis:
             return diagnosis
 
-        # ---- 4. 兜底：可选独立商品数量不足 / 其他组合冲突 ----
-        unique_ids: set = set()
-        for cands in slot_candidates:
-            for c in cands:
-                unique_ids.add(c.get("id"))
-        need = len(items_constraints)
-        if unique_ids and len(unique_ids) < need:
-            return [{
-                "type": "insufficient",
-                "title": "可选独立商品不足",
+        # ---- 4. 同一三级品类按数量展开后可选商品不足归因 ----
+        # 组合内商品必须互不相同：若某三级品类需要 N 件（数量展开成 N 个槽位），
+        # 则该品类在当前价格/折扣率条件下必须至少有 N 个不同的可选商品，否则必然无解。
+        cat_groups: Dict[str, List[int]] = {}
+        for i, slot in enumerate(items_constraints):
+            cat_key = slot.get("category_level3") or slot.get("category") or ""
+            if not cat_key:
+                continue
+            cat_groups.setdefault(cat_key, []).append(i)
+
+        group_diag: List[Dict[str, Any]] = []
+        for cat, idxs in cat_groups.items():
+            if len(idxs) < 2:
+                continue
+            need = len(idxs)
+            distinct_ids: set = set()
+            prices: set = set()
+            for i in idxs:
+                if i < len(slot_candidates):
+                    for c in slot_candidates[i]:
+                        distinct_ids.add(c.get("id"))
+                        prices.add(float(c.get("price") or 0))
+            if len(distinct_ids) >= need:
+                continue
+            available = len(distinct_ids)
+            price_txt = f"价格 {min(prices)}~{max(prices)} 元" if prices else "价格不限"
+            first_idx = min(idxs)
+            group_diag.append({
+                "type": "slot_quantity",
+                "title": f"第 {idxs[0] + 1}-{idxs[-1] + 1} 个品类「{cat}」可选商品数量不足",
                 "detail": (
-                    f"当前可选的独立商品仅有 {len(unique_ids)} 个，"
-                    f"不足以组成 {need} 个不同商品的组合。"
+                    f"您要求该三级品类共 {need} 件（数量 {need}），"
+                    f"但在当前价格/折扣率条件下符合的商品只有 {available} 个不同商品"
+                    f"（{price_txt}），同一商品不能重复使用，因此不足以组成 {need} 个互不相同的商品。"
                 ),
-                "suggestion": "放宽品类、价格或折扣率限制，或减少商品数量。",
-                "adjust": {"field": "remove_last_slot", "slot_index": max(0, need - 1)},
+                "suggestion": (
+                    f"请将「{cat}」的数量调整为 {available} 件或更少；"
+                    f"或放宽该品类的价格/折扣率限制，以增加可选商品数量；"
+                    f"或更换为可选商品更多的三级品类。"
+                ),
+                "adjust": {"field": "quantity", "slot_index": first_idx, "value": available, "op": "lt"},
+            })
+
+        if group_diag:
+            return group_diag
+
+        # ---- 5. 全局"互不相同"分配冲突归因 ----
+        # 即使每个品类单独看都有商品，多个槽位的候选集合也可能过小或相互重合，
+        # 导致无法为所有槽位分配一组互不相同的商品（二分图匹配无解）。
+        candidate_sets = [set(c.get("id") for c in cands) for cands in slot_candidates]
+        if not self._has_distinct_assignment(candidate_sets):
+            all_ids: set = set()
+            for s in candidate_sets:
+                all_ids |= s
+            sizes = [len(s) for s in candidate_sets]
+            min_size = min(sizes) if sizes else 0
+            tight_idxs = [i for i, s in enumerate(candidate_sets) if len(s) == min_size]
+            tight_names = []
+            for i in tight_idxs:
+                slot = items_constraints[i]
+                name = slot.get("category_level3") or slot.get("category") or f"第 {i + 1} 个品类"
+                tight_names.append(f"第 {i + 1} 个品类「{name}」")
+            tight_desc = "、".join(tight_names[:3])
+            if len(tight_names) > 3:
+                tight_desc += " 等"
+            detail = (
+                f"当前各商品位可选的去重商品共 {len(all_ids)} 个，而需要组成 {len(items_constraints)} 个互不相同的商品；"
+                f"且候选中存在过少或相互重合的商品位（可选商品最少为：{tight_desc}），"
+                f"无法为每个商品位分配到互不相同的商品。"
+            )
+            suggestion = (
+                f"请减少商品数量；或放宽这些商品位的价格/折扣率限制以增加可选商品；"
+                f"或更换为可选商品更多的品类；若同一品类数量较大，可适当降低该品类数量。"
+            )
+            return [{
+                "type": "assignment",
+                "title": "可选商品无法分配到各商品位（互不相同）",
+                "detail": detail,
+                "suggestion": suggestion,
             }]
 
+        # ---- 6. 兜底：给出具体、可执行的调整方向（而不是一句空泛的"放宽限制"） ----
+        slot_desc_parts = []
+        counts = []
+        for i, slot in enumerate(items_constraints):
+            cat = slot.get("category_level3") or slot.get("category") or f"第 {i + 1} 个品类"
+            n = len(slot_candidates[i]) if i < len(slot_candidates) else 0
+            counts.append(n)
+            conds = []
+            if slot.get("price_min") is not None:
+                conds.append(f"价格≥{slot['price_min']}元")
+            if slot.get("price_max") is not None:
+                conds.append(f"价格≤{slot['price_max']}元")
+            if slot.get("discount_min") is not None:
+                conds.append(f"折扣率≥{slot['discount_min']}%")
+            if slot.get("discount_max") is not None:
+                conds.append(f"折扣率≤{slot['discount_max']}%")
+            cond_txt = "，".join(conds) if conds else "无价格/折扣率限制"
+            slot_desc_parts.append(f"{cat}（可选{n}个，{cond_txt}）")
+        summary = "；".join(slot_desc_parts)
+
+        total_req_parts = []
+        if price_min > 0:
+            total_req_parts.append(f"总价≥{price_min}元")
+        if price_max != float('inf'):
+            total_req_parts.append(f"总价≤{price_max}元")
+        if min_discount_rate > 0:
+            total_req_parts.append(f"总折扣率≥{min_discount_rate}%")
+        if max_discount_rate < 100:
+            total_req_parts.append(f"总折扣率≤{max_discount_rate}%")
+        total_req_txt = "、".join(total_req_parts) if total_req_parts else "无总价/折扣率要求"
+
+        # 定位可选商品最少的品类（最可能"卡脖子"），给出针对性的放宽方向
+        tight_cat = None
+        min_n = 0
+        if counts:
+            min_n = min(counts)
+            tight_idx = counts.index(min_n)
+            tight_slot = items_constraints[tight_idx]
+            tight_cat = tight_slot.get("category_level3") or tight_slot.get("category") or f"第 {tight_idx + 1} 个品类"
+
+        # 统计"在满足各品类约束下"可行的总价/折扣率范围，让兜底建议更具体
+        feasible = self._stat_combos(slot_candidates, 0.0, float('inf'), 0.0, 100.0)
+        feasible_parts = []
+        if feasible.get("min_total") is not None:
+            feasible_parts.append(f"总价 {feasible['min_total']}~{feasible['max_total']} 元")
+        if feasible.get("min_discount") is not None:
+            feasible_parts.append(f"总折扣率 {feasible['min_discount']}%~{feasible['max_discount']}%")
+        feasible_txt = "；".join(feasible_parts) if feasible_parts else "无可行组合"
+
+        detail = (
+            f"各品类可选商品及约束如下：{summary}。"
+            f"在满足上述各品类约束的前提下，当前可组合的总价/折扣率范围为「{feasible_txt}」，"
+            f"而您要求「{total_req_txt}」，两者无法同时满足。"
+        )
+        if tight_cat:
+            suggestion = (
+                f"「{tight_cat}」当前仅可选 {min_n} 个商品，是导致无法组合的关键瓶颈："
+                f"请放宽该品类的价格/折扣率限制（或更换为可选商品更多的品类），"
+                f"或减少该品类的数量；同时请将总价/总折扣率调整到当前可行范围（{feasible_txt}）内，"
+                f"或适当放宽总价（当前要求：{total_req_txt}）与总折扣率。"
+            )
+        else:
+            suggestion = (
+                f"请将总价/总折扣率调整到当前可行范围（{feasible_txt}）内；"
+                f"当前总价要求为「{total_req_txt}」，若无法满足，请放宽总价或总折扣率，"
+                f"并放宽可选商品最少品类的价格/折扣率限制。"
+            )
         return [{
             "type": "general",
             "title": "组合条件相互冲突",
-            "detail": "未能组合出同时满足所有条件的方案。",
-            "suggestion": "尝试放宽商品品类、价格或折扣率限制。",
+            "detail": detail,
+            "suggestion": suggestion,
         }]
 
     def _cap_slot_candidates(
@@ -656,8 +899,8 @@ class CombinationEngine:
             idx = sizes.index(max(sizes))
             sizes[idx] = max(1, sizes[idx] // 2)
 
-        # 应用裁剪（保留价格更低的候选，便于生成合理方案）
-        capped = [slot_candidates[i][:sizes[i]] for i in range(n)]
+        # 应用裁剪：分层采样（保留首尾 + 中间均匀抽样），避免只保留最便宜候选导致总价目标无法达成
+        capped = [self._spread_sample(slot_candidates[i], sizes[i]) for i in range(n)]
         total = 1
         for s in sizes:
             total *= s
@@ -717,6 +960,50 @@ class CombinationEngine:
             field_parts.append("(" + " OR ".join(v_parts) + ")")
         return "(" + " OR ".join(field_parts) + ")", params
 
+    @staticmethod
+    def _spread_sample(items: List[Dict], k: int) -> List[Dict]:
+        """对候选列表做分层采样：保留首尾各若干 + 中间均匀抽样，覆盖价位区间。
+
+        用于"任意商品"槽位及候选数超限时的缩减，避免只保留最便宜的一批而导致
+        较高总价目标无法达成。
+        """
+        n = len(items)
+        if n <= k:
+            return list(items)
+        if k <= 3:
+            return items[:k]
+        head = max(1, k // 5)
+        tail = max(1, k // 5)
+        body_n = k - head - tail
+        if body_n <= 0:
+            return items[:k]
+        body = items[head:n - tail]
+        step = max(1, len(body) // body_n)
+        return (items[:head] + body[::step][:body_n] + items[n - tail:])[:k]
+
+    def _query_any_candidates(self, company_id: Optional[int] = None) -> List[Dict]:
+        """查询"任意商品"槽位的候选：在全部有价格商品中做分层采样。
+
+        覆盖低价/中价/高价，使"任意三个产品凑500元"这类需求能够选中合适商品。
+        """
+        sql = "SELECT * FROM products WHERE COALESCE(price, 0) > 0"
+        params = {}
+        if company_id:
+            sql += " AND company_id = :company_id"
+            params["company_id"] = company_id
+        sql += " ORDER BY price ASC"
+        try:
+            with sync_engine.connect() as conn:
+                rows = conn.execute(text(sql), params).fetchall()
+                if not rows:
+                    return []
+                columns = [col[1] for col in conn.execute(text("PRAGMA table_info(products)")).fetchall()]
+        except Exception as e:
+            logger.warning(f"查询任意商品候选失败: {e}")
+            return []
+        products = [dict(zip(columns, row)) for row in rows]
+        return self._spread_sample(products, self.MAX_CANDIDATES_PER_SLOT)
+
     def _query_candidates_for_slot(
         self,
         slot: Dict[str, Any],
@@ -734,11 +1021,12 @@ class CombinationEngine:
         params = {}
 
         # 三级品类（前端从三级品类列表选择，精确匹配）
-        if slot.get("category_level3"):
+        # "任意/随意/都可以"等表示"任意商品"，不应作为真实品类查询
+        if slot.get("category_level3") and not is_any_category(slot["category_level3"]):
             conditions.append("category_level3 = :cat3")
             params["cat3"] = slot["category_level3"]
 
-        if slot.get("category"):
+        if slot.get("category") and not is_any_category(slot["category"]):
             cat = slot["category"]
             conditions.append(
                 "(category_level1 LIKE :cat OR category_level2 LIKE :cat OR category_level3 LIKE :cat)"
@@ -788,6 +1076,7 @@ class CombinationEngine:
                 conditions.append("(" + " AND ".join(kw_conds) + ")")
 
         # 数据隔离
+        pure_any = not conditions
         if company_id:
             conditions.append("company_id = :company_id")
             params["company_id"] = company_id
@@ -832,7 +1121,11 @@ class CombinationEngine:
                 remaining = self.MAX_CANDIDATES_PER_SLOT - len(exact_rows)
                 return exact_rows + fuzzy_rows[: max(0, remaining)]
 
-        # 无商品名称关键词：直接查询
+        # 无商品名称关键词：
+        # 若该槽位是"任意商品"（无任何品类/价格/折扣率/品牌/规格/关键词约束），
+        # 用全库有价商品的分层样本，避免只取最便宜的一批导致较高总价目标无法达成。
+        if pure_any:
+            return self._query_any_candidates(company_id)
         return _run([], {}, self.MAX_CANDIDATES_PER_SLOT)
 
 

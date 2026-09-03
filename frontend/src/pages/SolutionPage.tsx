@@ -215,6 +215,9 @@ export default function SolutionPage() {
             } else if (adj.field === 'discount' && adj.slot_index != null) {
                 needsSlotOpen = true;
                 id = `sol-discount-${backendToFrontSlotIndex(adj.slot_index)}`;
+            } else if (adj.field === 'quantity' && adj.slot_index != null) {
+                needsSlotOpen = true;
+                id = `sol-qty-${backendToFrontSlotIndex(adj.slot_index)}`;
             } else if (adj.field === 'category' && adj.slot_index != null) {
                 needsSlotOpen = true;
                 id = `sol-cat-${backendToFrontSlotIndex(adj.slot_index)}`;
@@ -271,6 +274,13 @@ export default function SolutionPage() {
             updateSlot(fi, { discount_op: discOp, discount: value ?? null });
             flashHighlight(`sol-discount-${fi}`);
             message.success(`✅ 已自动把第 ${fi + 1} 个商品「${slots[fi]?.category || ''}」的折扣率限制填入 ${value}%（折扣率输入框已高亮），请点击「生成方案」`);
+        } else if (field === 'quantity' && slot_index != null) {
+            const fi = backendToFrontSlotIndex(slot_index);
+            if (!slotsOpen) updateState({ slotsOpen: true });
+            const qty = Math.max(1, Math.round(value ?? 1));
+            updateSlot(fi, { quantity: qty });
+            flashHighlight(`sol-qty-${fi}`);
+            message.success(`✅ 已自动把第 ${fi + 1} 个商品「${slots[fi]?.category || ''}」的数量调整为 ${qty} 件（数量输入框已高亮），请点击「生成方案」`);
         } else if (field === 'remove_last_slot') {
             if (slots.length > 1) {
                 updateState({ slots: slots.slice(0, slots.length - 1) });
@@ -899,6 +909,7 @@ export default function SolutionPage() {
                                                             style={{ width: 120 }}
                                                         />
                                                         <InputNumber
+                                                            id={`sol-qty-${idx}`}
                                                             placeholder="数量"
                                                             value={slot.quantity}
                                                             onChange={v => updateSlot(idx, { quantity: v ?? 1 })}

@@ -74,8 +74,30 @@ export default function AuthShell({ children, points = DEFAULT_POINTS }: AuthShe
                         ))}
                     </div>
                 </div>
+
+                {/* 左侧底部：编辑部式收尾（细线 + 微文案 + 页码），打破纯色底部的单调 */}
+                <div className="auth-hero-foot" aria-hidden="true">
+                    <div className="auth-hero-foot-rule" />
+                    <div className="auth-hero-foot-row">
+                        <span className="auth-hero-foot-caption">让报价，成为一门手艺</span>
+                        <span className="auth-hero-foot-page">01 / 03</span>
+                    </div>
+                </div>
             </div>
-            <div className="auth-panel">{children}</div>
+            <div className="auth-panel">
+                {/* 右侧最内层纯色背景：加上缓缓流动的渐变网格 + 纸面颗粒，告别单调（detail.design） */}
+                <div className="auth-panel-bg" aria-hidden="true" />
+                {children}
+
+                {/* 右侧底部：编辑部式收尾（细线 + 微文案 + 页码），同样打破纯色底部 */}
+                <div className="auth-panel-foot" aria-hidden="true">
+                    <div className="auth-panel-foot-rule" />
+                    <div className="auth-panel-foot-row">
+                        <span className="auth-panel-foot-caption">安全 · 内敛 · 高效</span>
+                        <span className="auth-panel-foot-page">02 / 03</span>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

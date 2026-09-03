@@ -706,7 +706,7 @@ body {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 64px 7vw;
+    padding: 64px 7vw 96px;
     position: relative;
     overflow: hidden;
     background:
@@ -843,14 +843,161 @@ body {
     line-height: 1.6;
 }
 
+/* —— 左侧底部：编辑部式收尾，打破纯色底部的单调 —— */
+.auth-hero-foot,
+.auth-panel-foot {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.auth-hero-foot {
+    padding: 0 7vw 26px;
+}
+
+.auth-panel-foot {
+    padding: 0 5vw 24px;
+}
+
+/* 底缘柔光：给“纯色底”加一点色彩呼吸 */
+.auth-hero-foot::before {
+    content: '';
+    position: absolute;
+    left: -4%;
+    right: -4%;
+    bottom: -4px;
+    height: 150px;
+    background:
+        radial-gradient(460px 150px at 10% 100%, rgba(232, 168, 10, 0.09), transparent 70%),
+        radial-gradient(520px 160px at 90% 100%, rgba(79, 70, 229, 0.08), transparent 70%);
+    filter: blur(12px);
+    pointer-events: none;
+}
+
+.auth-hero-foot-rule,
+.auth-panel-foot-rule {
+    position: relative;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, var(--ink-300) 24%, var(--ink-300) 76%, transparent 100%);
+    opacity: 0.55;
+}
+
+.auth-hero-foot-rule::after,
+.auth-panel-foot-rule::after {
+    content: '';
+    position: absolute;
+    left: calc(50% - 2.5px);
+    top: -2px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent-amber);
+    box-shadow: 0 0 0 4px rgba(232, 168, 10, 0.14);
+    animation: ddPulse 3.4s ease-in-out infinite;
+}
+
+.auth-hero-foot-row,
+.auth-panel-foot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 13px;
+}
+
+.auth-hero-foot-caption,
+.auth-panel-foot-caption {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 13.5px;
+    color: var(--ink-500);
+    letter-spacing: 0.01em;
+}
+
+.auth-hero-foot-page,
+.auth-panel-foot-page {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    color: var(--ink-400);
+}
+
+/* 右侧面板底部柔光：与左侧同语言，但主色偏靛蓝（表单侧更安静） */
+.auth-panel-foot::before {
+    content: '';
+    position: absolute;
+    left: -4%;
+    right: -4%;
+    bottom: -4px;
+    height: 140px;
+    background:
+        radial-gradient(460px 140px at 12% 100%, rgba(79, 70, 229, 0.07), transparent 70%),
+        radial-gradient(440px 140px at 88% 100%, rgba(232, 168, 10, 0.05), transparent 70%);
+    filter: blur(12px);
+    pointer-events: none;
+}
+
 .auth-panel {
     flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 48px 5vw;
+    padding: 48px 5vw 96px;
     position: relative;
+}
+
+/* —— 右侧最内层纯色背景：流动渐变网格 + 纸面颗粒（detail.design）—— */
+.auth-panel-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.auth-panel-bg::before {
+    content: '';
+    position: absolute;
+    inset: -18%;
+    background:
+        radial-gradient(520px 420px at 84% 16%, rgba(79, 70, 229, 0.08), transparent 62%),
+        radial-gradient(500px 420px at 14% 86%, rgba(232, 168, 10, 0.07), transparent 62%),
+        radial-gradient(560px 460px at 58% 48%, rgba(124, 58, 237, 0.05), transparent 62%);
+    filter: blur(16px);
+    animation: ddPanelMesh 28s ease-in-out infinite alternate;
+}
+
+/* 纸面颗粒：极弱噪点，让内层不再是“压平”的纯色 */
+.auth-panel-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.35;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    mix-blend-mode: multiply;
+    pointer-events: none;
+}
+
+/* 深色模式：噪点改为极弱的颗粒高光，避免被“压黑” */
+html[data-theme='dark'] .auth-panel-bg::after {
+    opacity: 0.18;
+    mix-blend-mode: screen;
+}
+
+@keyframes ddPanelMesh {
+    0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+    50% { transform: translate3d(-2%, 1.5%, 0) rotate(1.4deg) scale(1.04); }
+    100% { transform: translate3d(2%, -1.5%, 0) rotate(-1deg) scale(1.07); }
+}
+
+/* 让卡片/内容浮在网格颗粒之上 */
+.auth-panel > :not(.auth-panel-bg):not(.auth-panel-foot) {
+    position: relative;
+    z-index: 1;
 }
 
 .auth-card {
@@ -902,8 +1049,108 @@ body {
 }
 
 .auth-card .ant-input-affix-wrapper {
+    position: relative;
     border-radius: var(--radius);
     padding-block: 8px;
+    /* 底部分层：上沿高光 + 底部悬浮阴影，让“底”不再是一条平淡的边框线 */
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 46%),
+        var(--surface);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        0 1px 0 rgba(24, 24, 27, 0.03),
+        0 3px 6px -3px rgba(24, 24, 27, 0.12);
+    transition:
+        border-color 0.2s ease,
+        box-shadow 0.25s ease,
+        background-color 0.2s ease;
+}
+
+/* —— 底边工艺线：初始收成左下角一粒“原点”，聚焦时展开为靛蓝→琥珀渐变线 —— */
+.auth-card .ant-input-affix-wrapper::after {
+    content: '';
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-amber) 0%, var(--accent-indigo) 62%, rgba(79, 70, 229, 0) 100%);
+    transform: scaleX(0.18);
+    transform-origin: left center;
+    opacity: 0.7;
+    transition:
+        transform 0.38s var(--ease-out),
+        opacity 0.22s ease,
+        box-shadow 0.25s ease;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.auth-card .ant-input-affix-wrapper:hover::after {
+    opacity: 1;
+    transform: scaleX(0.46);
+}
+
+.auth-card .ant-input-affix-wrapper:focus-within::after,
+.auth-card .ant-input-affix-wrapper.ant-input-affix-wrapper-focused::after {
+    opacity: 1;
+    transform: scaleX(1);
+    box-shadow: 0 1px 8px rgba(79, 70, 229, 0.28);
+}
+
+/* 聚焦态：保留品牌色描边柔光环 + 底部分层阴影 */
+.auth-card .ant-input-affix-wrapper:focus-within,
+.auth-card .ant-input-affix-wrapper.ant-input-affix-wrapper-focused {
+    border-color: var(--accent-indigo);
+    box-shadow:
+        var(--ring),
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        0 1px 0 rgba(24, 24, 27, 0.03),
+        0 3px 6px -3px rgba(24, 24, 27, 0.12);
+}
+
+html[data-theme='dark'] .auth-card .ant-input-affix-wrapper:focus-within,
+html[data-theme='dark'] .auth-card .ant-input-affix-wrapper.ant-input-affix-wrapper-focused {
+    box-shadow:
+        var(--ring),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 1px 0 rgba(0, 0, 0, 0.24),
+        0 3px 8px -3px rgba(0, 0, 0, 0.42);
+}
+
+/* 前缀图标微交互：聚焦时轻轻放大、上浮并染上品牌色 */
+.auth-card .ant-input-affix-wrapper .anticon {
+    transition: color 0.2s ease, transform 0.26s var(--ease-spring);
+}
+
+.auth-card .ant-input-affix-wrapper:hover .anticon,
+.auth-card .ant-input-affix-wrapper:focus-within .anticon {
+    color: var(--accent-indigo) !important;
+}
+
+.auth-card .ant-input-affix-wrapper:focus-within .anticon {
+    transform: scale(1.08) translateY(-1px);
+}
+
+/* 占位符在聚焦时微微提亮，形成“内容即将进入”的呼应 */
+.auth-card .ant-input-affix-wrapper input::placeholder {
+    color: var(--ink-300);
+    transition: color 0.2s ease;
+}
+
+.auth-card .ant-input-affix-wrapper:focus-within input::placeholder {
+    color: var(--ink-400);
+}
+
+html[data-theme='dark'] .auth-card .ant-input-affix-wrapper {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 46%),
+        var(--surface);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 1px 0 rgba(0, 0, 0, 0.24),
+        0 3px 8px -3px rgba(0, 0, 0, 0.42);
 }
 
 .auth-card .ant-btn {
@@ -941,7 +1188,7 @@ body {
         display: none;
     }
     .auth-panel {
-        padding: 32px 20px;
+        padding: 32px 20px 96px;
     }
     .dd-content {
         padding: 20px 16px;
@@ -1057,6 +1304,27 @@ body {
 .ant-input-number-input,
 .ant-select-selection-search-input {
     caret-color: var(--accent-indigo);
+}
+
+/* —— 浏览器自动填充（Autofill）背景纠正 ——
+   登录/注册等表单中，浏览器常对已保存的账号/密码输入框自动填色
+   （浅黄/浅蓝），使输入框与被周围卡片颜色不一致。这里用同色内阴影
+   遮盖自动填充背景，并恢复文字与光标颜色，避免“突兀色块”。 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:-internal-autofill-selected,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--surface) inset !important;
+    background-color: var(--surface) !important;
+    -webkit-text-fill-color: var(--ink-900) !important;
+    caret-color: var(--accent-indigo);
+    transition: background-color 9999s ease-in-out 0s;
 }
 
 /* —— 禁用按钮点击抖动（Shake Disabled Button）—— */
