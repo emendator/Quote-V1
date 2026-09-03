@@ -1,7 +1,7 @@
 """Pydantic 请求/响应模型"""
 from typing import Optional, List, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 
 # ========== 商品相关 ==========
@@ -105,7 +105,7 @@ class ProductResponse(BaseModel):
     specification: Optional[str] = ""
     remark: Optional[str] = ""
     shipping_fee: Optional[float] = None
-    barcode_69: str
+    barcode_69: str = ""
     sales_volume: Optional[float] = 0
     recommendation: Optional[str] = ""
     parameters: Optional[str] = ""
@@ -122,6 +122,13 @@ class ProductResponse(BaseModel):
         if v is None:
             return None
         return v.isoformat()
+
+    # 数据库里这些列允许为 NULL（导入数据可能缺值），遇到 None 一律归一为空串，
+    # 避免 model_validate 时因类型校验失败抛 ValidationError 导致接口 500。
+    @field_validator("quick_model", "product_model", "barcode_69", mode="before")
+    @classmethod
+    def _coerce_null_strings(cls, v):
+        return "" if v is None else v
 
 
 class BatchDeleteRequest(BaseModel):
