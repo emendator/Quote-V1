@@ -67,14 +67,36 @@ api.interceptors.response.use(
     },
     (err) => {
         // HTTP 层面错误（如网络断开、500等）
-        if (err.response?.status === 401) {
+        const status = err.response?.status;
+        // 是否为「数据导入上传」接口（nginx/Python 可能因文件过大或超时在没返回业务 body 时就中断）
+        const isUpload = (err.config?.url || '').includes('/import/upload');
+        if (status === 401) {
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_user');
             if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
                 window.location.href = '/login';
             }
         }
-        const msg = err.response?.data?.detail || err.response?.data?.message || err.message || '请求失败';
+        let msg = err.response?.data?.detail || err.response?.data?.message || '';
+        if (!msg) {
+            // 后端未返回可读 body 时，根据 HTTP 状态给出更明确的中文提示
+            if (status === 408) {
+                // nginx/服务器在「读取请求体」阶段超时——常见于上传链路慢或不稳定
+                msg = isUpload
+                    ? '上传超时：文件发送未在限定时间内完成，多为到你当前网络的服务器上传较慢或中断，请检查网络后再试'
+                    : '请求超时：连接中断或等待过久，请检查网络后再试';
+            } else if (isUpload && (status === 413 || status === 502 || status === 503)) {
+                msg = '文件上传失败：文件过大/图片过多超过上限，或服务器暂时不可用。请压缩或拆分文件、稍后再试';
+            } else if (status === 413) {
+                msg = '上传内容过大，已超过服务器限制，请压缩文件后重试';
+            } else if (status === 502 || status === 503) {
+                msg = '服务器暂时不可用或处理超时，请稍后重试';
+            } else if (status === 504 || err.code === 'ECONNABORTED') {
+                msg = '请求超时：服务器处理过久未返回，请稍后重试';
+            } else {
+                msg = err.message || '请求失败，请稍后重试';
+            }
+        }
         return Promise.reject(new Error(msg));
     }
 );
