@@ -22,7 +22,8 @@
 13. [常见问题](#-常见问题)
 14. [数据备份与维护](#-数据备份与维护)
 15. [AI 费用说明](#-ai-费用说明)
-16. [附录：项目文件说明](#-附录项目文件说明)
+16. [附录：技术架构与开发指南](#-附录技术架构与开发指南)
+17. [附录：代码文件目录与功能详解](#-附录代码文件目录与功能详解)
 
 ---
 
@@ -150,6 +151,19 @@
 >
 > 💡 在智能查询、智能方案、数据管理等页面，可点击右上角的 **「列配置」** 按钮，自定义表格中列的显示、顺序、宽度和表头名称。
 
+### 界面外观（深色 / 浅色主题）
+
+系统提供 **浅色** 和 **深色** 两种界面外观，可在登录页或登录后随时一键切换：
+
+- **切换位置**：
+  - 登录 / 注册页：右上角有一个 **☀️ / 🌙 按钮**
+  - 登录后：在主界面**顶部标题栏右侧**（用户头像左侧）有一个 **☀️ / 🌙 按钮**
+- **切换方式**：点击该按钮即可在「浅色 ⇄ 深色」之间切换
+- **自动记住**：你的选择会**自动保存**，下次打开系统仍保持上次的外观
+- **夜间更护眼**：深色模式采用低亮度、低对比度的深色画布，适合在光线较暗的环境长时间使用
+
+> 💡 深色模式下，所有页面（查询、方案、数据管理、导入、登录等）都会随之适配为深色观感，浏览器的地址栏颜色也会同步变化。
+
 ---
 
 ## 🔍 功能一：智能查询（查商品）
@@ -172,10 +186,12 @@
 | 粘贴客户消息 | 直接把微信群里的询价文字粘贴进来 |
 
 > 小技巧：按 `Enter` 搜索，`Shift+Enter` 换行。
+>
+> 💡 **不想打字？** 输入框下方有 **快捷示例**（如 `飞利浦充电宝100块以下`、价格区间、69码、组合查询等），**点击一下**即可自动填入并立刻查询；**「📋 粘贴」按钮**可把你复制好的客户询价文字一键粘进来（系统会弹窗询问浏览器授权，同意即可用）。
 
 ### 方法1b：批量快查型号（一次查多个）
 
-切换到 **「批量」模式**，每行输入一个快查型号，系统会分别查询每个型号的代发价等信息，结果按型号分组展示。
+切换到 **「批量」模式**，每行输入一个快查型号（换行分隔），系统会分别查询每个型号的代发价等信息，结果按型号分组展示。
 
 ```
 例如：
@@ -265,6 +281,19 @@ AP10-追觅
 
 3. 点击 **「生成组合方案」** — AI 会自动解析总价、三级品类、价格/折扣率限制并生成方案
 4. 方案列表顶部会显示 AI 解析出的需求摘要和本次消耗的 tokens
+
+#### 不指定品类？（"任意 / 不限"商品）
+
+即使你不限定具体商品，也能让系统帮你出方案。用自然语言说清楚"要几件、大概多少钱、折扣率多少"即可，例如：
+
+```
+我需要一个价值500元的礼盒，包含任意三个产品，整体折扣率低于70%
+给我配 5000 元以内的随便 4 样商品
+```
+
+- 当你使用 **"任意 / 随意 / 不限 / 都可以 / 什么都可以 / 商品"** 等词（或干脆只说要几件"产品"）时，系统会把它理解为**不限定具体品类**的槽位
+- 这样的槽位会从**全部有价格的商品**中挑选，且会**分层采样**（低价、中价、高价都会覆盖），而不是只挑最便宜的几个，因此能凑出较高的目标总价
+- 若"任意"目标在总价 / 数量上确实无法达成（例如任意 3 件凑满 5000 元），系统同样会给出具体可行的调整建议
 
 ### 组合方案结果
 
@@ -503,6 +532,12 @@ AP10-追觅
 - **型号** 和 **69码** 已改为选填，没有这些列也能正常导入
 - 查看导入结果中的错误原因，修改 Excel 后重试
 
+### 上传 / 导入文件报错（超时、上传失败等）
+
+- 上传或导入文件失败时，系统会给出**清晰的中文提示**（如"上传超时""文件过大""服务器繁忙"等），便于定位原因
+- 服务器端已放宽到 **500 MB** 以内文件、并延长上传等待时间；但仍受网络上行速度影响
+- 若上传大文件反复失败：优先检查 **本地上行网络**是否稳定（云盘/大附件上传若也慢，多半是本地网络问题）；可尝试关闭占用带宽的软件、改用更小文件分批导入，或换更好的网络后重试
+
 ### 数据丢失了
 
 - 先检查 `data/data.db` 文件是否存在（在项目文件夹里）
@@ -598,107 +633,240 @@ AI 功能调用 [DeepSeek API](https://api-docs.deepseek.com/zh-cn/quick_start/p
 
 ---
 
-## 📁 附录：项目文件说明
+## 🧑💻 附录：技术架构与开发指南
 
-```
-智能报价/                      ← 项目总文件夹
-│
-├── 启动.bat                   ← ⭐ 一键启动（双击这个）
-├── README.md                  ← 本说明书
-│
-├── backend/                   ← 后端程序（一般情况下不要动）
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py            ← 后端入口
-│   │   ├── database.py        ← 数据库连接
-│   │   ├── models.py          ← 数据表结构
-│   │   ├── schemas.py         ← 数据格式定义
-│   │   ├── config.py          ← 配置文件（API密钥等）
-│   │   ├── routers/           ← API 接口
-│   │   │   ├── products.py    ← 商品相关接口
-│   │   │   ├── query.py       ← 查询相关接口
-│   │   │   ├── import_data.py ← 导入相关接口
-│   │   │   ├── solutions.py   ← 智能方案接口
-│   │   │   ├── auth.py        ← ⭐ 登录/注册/用户管理
-│   │   │   ├── invites.py     ← ⭐ 邀请码管理
-│   │   │   ├── company.py     ← ⭐ 公司绑定 / 公司密码管理
-│   │   │   └── column_display.py ← 列显示配置接口
-│   │   ├── services/          ← 业务逻辑
-│   │   │   ├── query_engine.py       ← 查询引擎
-│   │   │   ├── ai_query_service.py   ← AI 智能查询
-│   │   │   ├── solution_service.py   ← 智能方案服务
-│   │   │   ├── combination_engine.py ← 组合方案生成引擎
-│   │   │   ├── import_service.py     ← 导入服务
-│   │   │   ├── message_parser.py     ← 消息解析
-│   │   │   ├── product_service.py    ← 商品服务
-│   │   │   ├── column_display_service.py ← 列显示配置服务
-│   │   │   ├── company_service.py   ← ⭐ 公司创建/验证/改密码/无账号公司自动清理
-│   │   │   ├── api_key_service.py    ← ⭐ API Key 调用/Token 跟踪
-│   │   │   └── cleanup_service.py    ← 自动清理服务
-│   │   └── utils/             ← 工具函数
-│   │       ├── auth_utils.py  ← ⭐ JWT/密码/认证工具
-│   │       ├── crypto_utils.py← ⭐ 用户名/API Key 加密、username_hash
-│   │       └── excel_utils.py ← Excel 读写工具
-│   │
-│   ├── ../data/                   ← 数据目录（删除后应用启动会自动重建）
-│   │   ├── data.db             ← ⭐ 数据库文件（所有数据在这里！）
-│   │   ├── uploads/            ← 上传的输入缓存（自动清理）
-│   │   └── output/             ← 导出/生成的输出缓存（可删除重建）
-│   └── requirements.txt        ← Python 依赖列表
-│
-├── deploy/                     ← 云服务器部署配置
-│   ├── deploy.sh               ← 一键部署脚本（Nginx/systemd/防火墙）
-│   ├── nginx.conf              ← Nginx 站点配置（外部 8085 → 后端 8008）
-│   ├── smart-quotation.service ← systemd 后端守护（开机自启+崩溃自愈）
-│   └── update.sh               ← 服务器更新脚本（重新构建+重启）
-│
-└── frontend/                   ← 前端程序（一般情况下不要动）
-    ├── index.html
-    ├── package.json
-    ├── tsconfig.json
-    ├── vite.config.ts
-    └── src/
-        ├── main.tsx            ← 前端入口
-        ├── App.tsx             ← 路由配置
-        ├── App.css             ← 全局样式
-        ├── pages/              ← 各页面
-        │   ├── LoginPage.tsx          ← 登录
-        │   ├── RegisterPage.tsx       ← 注册
-        │   ├── CompanyInfoPage.tsx    ← 完善/修改公司信息
-        │   ├── HomePage.tsx           ← 智能查询页
-        │   ├── SolutionPage.tsx       ← 智能方案页
-        │   ├── DataManagePage.tsx     ← 数据管理页
-        │   └── InviteCodePage.tsx     ← 用户管理页
-        ├── components/         ← 公共组件
-        │   ├── Layout.tsx            ← 页面布局+侧边菜单+用户头像
-        │   ├── RequireAuth.tsx       ← 权限路由守卫
-        │   ├── SmartQueryInput.tsx   ← 智能查询输入框
-        │   ├── QueryResult.tsx       ← 查询结果表格
-        │   ├── ProductTable.tsx      ← 商品数据表格
-        │   ├── ProductForm.tsx       ← 商品编辑表单
-        │   ├── ImportDialog.tsx      ← 导入对话框
-        │   ├── ColumnMapping.tsx     ← 列映射配置
-        │   └── ColumnDisplayConfig.tsx ← 列显示配置弹窗
-        ├── services/
-        │   └── api.ts          ← 调用后端 API（含 Token 自动注入、401 拦截）
-        ├── store/
-        │   ├── AuthContext.tsx        ← 登录态管理
-        │   └── PageStateContext.tsx   ← 页面状态保持
-        └── types/
-            └── index.ts        ← 类型定义
+> 本节面向**开发者 / 维护人员**；普通使用者只需阅读上方“使用说明”即可。  
+> 系统由独立的 `backend`（接口与业务）和 `frontend`（浏览器界面）两部分组成，二者通过 HTTP/JSON 通信。
+
+### 1. 技术栈总览
+
+| 层次 | 技术 | 用途 |
+| ---- | ---- | ---- |
+| 前端框架 | React 18 + TypeScript 5 | 单页应用（SPA），代码在 `frontend/src` |
+| 前端构建 | Vite 5 | 开发服务器 / 生产打包 |
+| UI 组件 | Ant Design 5 + 自定义 CSS | 表单、表格、弹窗、浅色/深色主题 |
+| 路由 / 状态 | React Router 6 + Context | 页面路由；Auth / Theme / PageState 三个全局状态 |
+| HTTP 客户端 | axios | 调用后端 `/api/*`（封装 token 注入与错误提示） |
+| 后端框架 | FastAPI + uvicorn | REST API，开发默认监听 8000 端口 |
+| ORM / 数据库 | SQLAlchemy 2 + aiosqlite | 异步 ORM；数据存 SQLite 单文件 `data/data.db` |
+| 数据校验 | Pydantic v2 | 请求 / 响应模型校验（schemas.py） |
+| Excel | pandas + openpyxl + lxml | Excel/CSV 解析与导出（含图片嵌入单元格） |
+| 认证安全 | pyjwt + passlib(bcrypt) + cryptography | JWT 登录态；密码、用户名、API Key 加密 |
+| AI | DeepSeek Chat API（httpx） | AI 智能查询、AI 解析客户需求 |
+| 部署 | Nginx + systemd + deploy/*.sh | 公网 8085 → 后端 8008 |
+
+### 2. 请求链路与模块分层
+
+```text
+浏览器（React SPA，frontend/）
+   │  axios 调用 /api/*（开发环境由 Vite 把 /api 代理到 127.0.0.1:8000）
+   ▼
+backend/app/routers/  —— HTTP 层：路由、登录/角色权限校验、参数校验
+   ▼
+backend/app/services/ —— 业务层：查询引擎、组合方案引擎、导入导出、AI 调用等
+   ▼
+backend/app/models.py + database.py —— ORM 模型与数据库会话
+   ▼
+data/data.db（SQLite）
 ```
 
-### 关键文件说明
+- **路由**：8 组业务路由挂在 FastAPI 应用上：`/api/auth`（登录注册）、`/api/company`（公司）、`/api/invites`（邀请码）、`/api/products`（商品）、`/api/query`（查询）、`/api/solution`（方案）、`/api/import`（导入）、`/api/column-display`（列配置）；另有 `/api/health` 健康检查与 `/api/cleanup` 手动清理接口。
+- **数据隔离**：业务数据都归属某个公司（身份凭证 = 公司名 + 公司数据库密码），所有查询/写入都带 `company_id` / `company_name`，公司之间互不可见；游客拥有独立的临时公司，退出登录或 24 小时过期后自动清除。
+- **权限模型**：super_admin > admin > user > guest，路由层通过 `require_company`、`require_company_manager` 等 FastAPI 依赖做拦截。
+- **AI 调用**：统一收口在 `services/api_key_service.py`（读个人加密 Key、累计 token）、`services/ai_query_service.py`（AI 查询）、`services/solution_service.py`（AI 解析方案需求）中；每个用户使用自己的 DeepSeek Key，各自计费。
+- **静态文件**：后端启动时若检测到 `frontend/dist` 目录，会自动托管前端生产构建产物，实现单端口访问。
 
-| 文件 | 作用 | 你需要关心吗？ |
-| ----- | ------ | -------------- |
-| `启动.bat` | 一键启动系统 | ⭐ **双击它就行** |
-| `data/data.db` | 所有数据存在这里 | ⭐ **备份这个文件** |
-| `backend/app/config.py` | API 密钥等配置 | 🔧 只有需要修改配置时才看 |
-| `data/uploads/` | 上传的输入缓存 | ❌ 不用管，自动清理 |
-| `data/output/` | 导出/生成的输出缓存 | ❌ 不用管，可删除重建 |
-| `backend/app/services/cleanup_service.py` | 每30分钟自动清理上传文件 | ❌ 不用管 |
+### 3. 本地开发启动（命令行方式）
+
+> `启动.bat` 本质就是自动执行下面两条命令；开发人员可直接用命令行以获得实时日志。
+
+后端（终端先进入 backend 目录，使用项目根目录自带虚拟环境里的 Python）：
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+前端（另开一个终端窗口）：
+
+```powershell
+cd frontend
+npm install    # 仅首次或依赖变化时
+npm run dev    # 打开 http://localhost:5173
+```
+
+- Swagger 接口文档：http://127.0.0.1:8000/docs
+- 健康检查：http://127.0.0.1:8000/api/health
+- 初始超级管理员：`admin` / `***REMOVED-PASSWORD***`，所属公司“***REMOVED-COMPANY***”（数据库重建后固定不变）
+- 生产构建：`cd frontend && npm run build` 后访问后端 8000 端口即可，或按 `deploy/` 部署到云服务器
+
+### 4. 常用环境变量
+
+| 环境变量 | 默认值 | 说明 |
+| ------- | ------ | ---- |
+| JWT_SECRET_KEY | 内置开发默认值 | JWT 与敏感信息加密密钥，**生产环境必须改为随机值** |
+| ADMIN_API_KEY | 空 | 启动时自动写入超级管理员的 DeepSeek API Key |
+| DATABASE_URL / SYNC_DATABASE_URL | data/data.db | 数据库连接串（默认 SQLite，可换其他库） |
+| HOST / PORT | 0.0.0.0 / 8000 | 后端监听地址与端口 |
+| CORS_ORIGINS | localhost:5173 | 允许跨域的前端来源（逗号分隔） |
+| DEEPSEEK_API_URL / DEEPSEEK_MODEL | DeepSeek 官方接口 | AI 接口地址与模型名 |
+
+> 所有配置集中在 `backend/app/config.py`；启动脚本 `launcher.ps1` 与 `deploy/` 脚本会覆盖部分端口。
 
 ---
 
-> 版本 2.5.0 | 基于 FastAPI + React 构建 | AI 使用 DeepSeek API | API Key 加密存储 | 游客体验模式 + 无账号公司自动清理
+## 📁 附录：代码文件目录与功能详解
+
+> 下面目录覆盖**项目当前全部源码与运行配置**；生成物（`__pycache__`、`node_modules`、`dist`、`*.tsbuildinfo` 等）不重复列出。每行注释（`←` 之后）说明该文件实现的功能，让不熟悉本项目的人也能按目录快速定位代码。
+
+### 一、项目根目录
+
+```text
+智能报价/
+├── 启动.bat                    ← 面向最终用户的一键启动入口（双击即可，实际转调 launcher.ps1）
+├── launcher.ps1                ← PowerShell 启动脚本：自动检测 Python/Node，创建/修复 .venv，安装依赖，启动前后端并打开浏览器，关闭窗口时停止服务
+├── README.md                   ← 本文档：使用说明书 + 技术架构 + 代码文件说明
+├── .gitignore                  ← Git 忽略规则（data/、.venv、node_modules、__pycache__ 等）
+├── backend/                    ← 后端源码目录（FastAPI + Python），详见下节
+├── frontend/                   ← 前端源码目录（React + TypeScript），详见下节
+├── data/                       ← 运行时数据目录（自动生成/重建，不提交 Git），详见下节
+├── deploy/                     ← 云服务器部署脚本与配置，详见下节
+├── docs/                       ← 设计文档（需求分析、技术架构、数据模型等）
+└── 工作日报/                    ← 开发过程日报（git 已忽略，非运行必需）
+```
+
+### 二、后端 backend/ 代码文件
+
+```text
+backend/                                ← 后端源码根目录
+├── requirements.txt                    ← Python 依赖清单（FastAPI、uvicorn、SQLAlchemy、pandas、openpyxl、bcrypt 3.2.2、pyjwt、cryptography 等）
+├── app/                                ← FastAPI 应用包
+│   ├── __init__.py                     ← Python 包标识文件（空）
+│   ├── main.py                         ← 后端入口：创建 FastAPI 应用、注册 CORS 与全部路由；启动时初始化数据库、注入管理员 API Key、开启定时清理；生产环境自动托管 frontend/dist
+│   ├── config.py                       ← 集中配置：数据目录/数据库路径、服务端口、CORS、上传限制、JWT、DeepSeek 接口、超级管理员预设账号（支持环境变量覆盖）
+│   ├── database.py                     ← 数据库层：异步/同步引擎与会话依赖 get_db、建表与旧库迁移（init_db）、超级管理员种子数据（seed_super_admin）
+│   ├── models.py                       ← SQLAlchemy 表模型：User 用户、Company 公司、InviteCode 邀请码、Product 商品、ColumnDisplayConfig 列显示配置、ImportTemplate/ImportLog 导入模板与日志、SolutionPlan/SolutionItem 方案主表与明细
+│   ├── schemas.py                      ← Pydantic 数据模型：全部 API 的请求体、响应体、分页结构（前端所见 JSON 结构由此定义）
+│   ├── routers/                        ← HTTP 接口层（只做路由/鉴权/参数校验，业务转发给 services）
+│   │   ├── __init__.py                 ← Python 包标识文件（空）
+│   │   ├── auth.py                     ← /api/auth：注册、登录、当前用户信息、完善公司资料、修改登录密码、配置/查询个人 API Key、游客登录与游客退出清理
+│   │   ├── company.py                  ← /api/company：绑定公司（加入已有公司/新注册公司）、修改公司数据库密码、手动清理无账号公司
+│   │   ├── invites.py                  ← /api/invites：邀请码创建/列表/校验/删除/续期；删除已被使用的邀请码会级联删除该账号及其业务数据
+│   │   ├── products.py                 ← /api/products：商品分页列表/筛选/详情、新增/编辑/删除/批量删除、导出 Excel、品类/品牌/三级品类与筛选下拉数据、上级公司推荐商品
+│   │   ├── import_data.py              ← /api/import：上传 Excel/CSV 并返回预览与列映射，确认后按“跳过/覆盖/报错”策略导入当前公司
+│   │   ├── query.py                    ← /api/query：规则智能查询、AI 智能查询、批量快查型号、查询结果导出 Excel
+│   │   ├── solutions.py                ← /api/solution：方案需求分析生成组合、保存方案、导出方案 Excel、历史方案列表/详情/删除、上级公司推荐方案
+│   │   └── column_display.py           ← /api/column-display：读取/保存“产品库、查询结果、批量查询、方案明细”四类页面的列显示配置及可用列清单
+│   ├── services/                       ← 业务逻辑层（项目核心算法都在这里）
+│   │   ├── __init__.py                 ← Python 包标识文件（空）
+│   │   ├── query_engine.py             ← 规则查询引擎：把自然语言/快捷条件解析成结构化查询条件并查库（69码、型号、品牌、品类、各类价格区间、排序、模糊搜索、折扣率过滤等，全程按公司隔离）
+│   │   ├── ai_query_service.py         ← AI 智能查询服务：把用户自然语言交给 DeepSeek 转成查询意图，再执行查询并返回解析说明与 token 消耗
+│   │   ├── message_parser.py           ← 微信群消息解析器：清洗粘贴来的聊天文本，提取 69码/型号/价格区间/规格等可查询内容
+│   │   ├── solution_service.py         ← 智能方案服务：多块输入/自然语言/AI 三种方式解析客户需求，筛选候选商品，管理方案保存/历史/删除/导出与推荐方案
+│   │   ├── combination_engine.py       ← 组合方案引擎：在总价、总折扣率、各品类数量/限价等约束下枚举可行商品组合并排序，同时产出“无方案原因诊断 + 一键应用建议”所需数据
+│   │   ├── import_service.py           ← 数据导入服务：解析文件、自动模糊匹配表头列名、按重复策略写库、返回成功/跳过/失败明细，并清理上传临时文件
+│   │   ├── product_service.py          ← 商品业务：商品 CRUD、批量删除、分类/品牌/三级品类与筛选选项、查询结果/产品库/指定 ID 的 Excel 导出（含图片）
+│   │   ├── column_display_service.py   ← 列显示配置业务：按用户与页面类型存取列配置、提供可用列与默认列定义
+│   │   ├── company_service.py          ← 公司业务：创建/验证公司（公司数据库密码）、修改公司密码、清理过期游客与无账号公司
+│   │   ├── api_key_service.py          ← API Key 业务：读取用户/公司的 DeepSeek Key、累计 token 消耗、统一的 DeepSeek 调用入口
+│   │   └── cleanup_service.py          ← 自动清理服务：删除过期的上传缓存文件与内存缓存条目
+│   └── utils/                          ← 公共工具函数
+│       ├── __init__.py                 ← Python 包标识文件（空）
+│       ├── auth_utils.py               ← 认证工具：bcrypt 密码哈希/校验、JWT 签发与解析、generate_invite_code、require_* 系列角色权限依赖
+│       ├── crypto_utils.py             ← 加密工具：用户名、API Key 等敏感信息的加解密，以及 username_hash 计算
+│       └── excel_utils.py              ← Excel 工具：读取表格/生成预览、提取并嵌入图片到单元格、日期时间字符串归一化、列宽换算等
+├── _check_db.py                        ← 开发自检脚本：检查数据库最近商品是否含图片数据（非运行必需，可删除）
+├── _test_api.py                        ← 开发自检脚本：冒烟测试登录与上传接口（非运行必需，可删除）
+└── test_solution.py                    ← 开发自检脚本：快速测试智能方案分析接口（非运行必需，可删除）
+```
+
+### 三、前端 frontend/ 代码文件
+
+```text
+frontend/                               ← 前端源码根目录（Vite + React + TypeScript）
+├── index.html                          ← HTML 入口模板：挂载 #root；内联脚本在首帧前恢复已保存的浅/深主题，避免闪烁
+├── package.json                        ← 前端依赖与脚本：dev（开发）、build（TS 编译 + Vite 打包）、preview
+├── package-lock.json                   ← npm 锁定依赖版本（由 npm install 自动维护，一般不动）
+├── tsconfig.json                       ← TypeScript 编译配置
+├── tsconfig.node.json                  ← Vite/Node 环境的独立 TS 配置
+├── vite.config.ts                      ← Vite 配置：React 插件、开发端口 5173、把 /api 代理到后端 127.0.0.1:8000
+└── src/
+    ├── main.tsx                        ← 前端入口：挂载 React 根节点、BrowserRouter、引入全局样式并初始化全局动效
+    ├── App.tsx                         ← 根组件：主题 Provider、Antd ConfigProvider（中文 + 浅/深主题）、全站路由表与路由守卫
+    ├── App.css                         ← 全局样式：CSS 变量定义的浅色/深色主题、所有自定义排版、动效、登录页/表格/弹窗样式
+    ├── theme.ts                        ← Antd 浅色/深色主题对象（与 App.css 的 CSS 变量配合生效）
+    ├── motion.ts                       ← 全局微交互：涟漪、磁性悬停、3D 倾斜等动效初始化
+    ├── pages/                          ← 页面级组件（每个路由一页）
+    │   ├── LoginPage.tsx               ← 登录页：组合 AuthShell 与 AuthFlipCard 展示登录卡片
+    │   ├── RegisterPage.tsx            ← 注册页：展示翻转卡片的“注册”面（用户名/邮箱/密码/邀请码）
+    │   ├── CompanyInfoPage.tsx         ← 完善公司信息页：首次登录选择“加入已有公司”或“新注册公司”，填写公司数据库密码并保存联系人信息
+    │   ├── HomePage.tsx                ← 智能查询页：自然语言/AI/批量三种查询、快捷价格档位、筛选条件、查询结果与导出、加入“方案清单”、推荐商品展示
+    │   ├── DataManagePage.tsx          ← 数据管理页：商品库搜索/分页/缩放/排序，新增/编辑/删除/批量删除，导入与导出入口、列配置入口
+    │   ├── SolutionPage.tsx            ← 智能方案页：多块输入与 AI 输入切换、生成组合方案、方案预览/排序、无方案诊断与“一键应用建议”、保存/导出/历史方案、推荐方案
+    │   ├── InviteCodePage.tsx          ← 用户管理页（管理员/最高级管理员）：创建一级/二级邀请码、查看注册成员信息、续期与删除邀请码（含级联清理提示）
+    │   └── NotFoundPage.tsx            ← 404 页面：未登录时引导去登录，已登录时展示 404 提示
+    ├── components/                     ← 可复用 UI 组件
+    │   ├── AuthShell.tsx               ← 登录/注册/公司信息页共用外壳：居中卡片布局、页面背景、右上角浅/深主题切换按钮
+    │   ├── AuthFlipCard.tsx            ← 登录 ⇄ 注册“翻转卡片”：表单、校验、登录/注册提交、游客登录入口
+    │   ├── InteractiveBackground.tsx   ← 登录页交互式背景动画（Canvas 粒子/光标互动）
+    │   ├── Layout.tsx                  ← 登录后主布局：左侧菜单、顶部标题栏、主题切换、用户菜单（修改密码/API Key 配置/公司数据库密码）、账号过期提醒、游客退出二次确认
+    │   ├── RequireAuth.tsx             ← 路由守卫：未登录跳转登录页，指定角色不满足时回到首页
+    │   ├── SmartQueryInput.tsx         ← 智能查询输入区：文本输入、快捷示例一点即查、粘贴按钮、批量型号输入（AI 开关与页面联动）
+    │   ├── QueryResult.tsx             ← 查询结果组件：结果表格/批量分组结果、列显示配置、数字滚动统计、勾选导出、加入方案清单、推荐产品卡片
+    │   ├── ProductTable.tsx            ← 商品数据表格：缩放、图片缩略图预览、链接列、表头下拉筛选、勾选与行操作
+    │   ├── ProductForm.tsx             ← 商品新增/编辑表单弹窗（快查型号、代发价等必填校验）
+    │   ├── ImportDialog.tsx            ← Excel 导入向导弹窗：多文件选择→上传→列映射→重复策略→确认导入→结果明细
+    │   ├── ColumnMapping.tsx           ← 导入列映射组件：Excel 表头与系统字段的对应关系设置
+    │   └── ColumnDisplayConfig.tsx     ← “列配置”弹窗：自定义列显示/隐藏、顺序、宽度与表头名称，保存到后端
+    ├── hooks/
+    │   └── useCountUp.tsx              ← 数字滚动动画 Hook（尊重系统“减弱动态效果”设置）
+    ├── services/
+    │   └── api.ts                      ← 后端 API 统一封装：全站 axios 请求函数、token 注入、401 自动登出、上传超时/大文件/5xx 的中文错误提示
+    ├── store/
+    │   ├── AuthContext.tsx             ← 登录状态管理：登录/注册/游客登录/退出、恢复会话、角色判断与用户信息
+    │   ├── PageStateContext.tsx        ← 页面状态保持：切换页面后恢复搜索条件/结果/分页，切换账号时清空
+    │   └── ThemeContext.tsx            ← 主题状态管理：浅色/深色切换并持久化到 localStorage
+    └── types/
+        └── index.ts                    ← 全局 TypeScript 类型定义：商品、用户、邀请码、方案、请求/响应等接口
+```
+
+### 四、运行时数据与部署相关目录
+
+```text
+data/                          ← 运行时数据（git 已忽略；删除后重启应用会自动重建）
+├── data.db                    ← ⭐ 全部业务数据的 SQLite 数据库文件（备份它 = 备份整个系统数据）
+├── uploads/                   ← 上传文件的临时缓存（由 cleanup_service 定时自动清理）
+└── output/                    ← 导出/生成文件的输出缓存（可随时删除）
+
+deploy/                        ← 云服务器部署相关文件
+├── deploy.sh                  ← Ubuntu 一键部署脚本：检查环境、装依赖、构建前端、配置 Nginx/systemd/防火墙
+├── nginx.conf                 ← Nginx 站点配置：公网端口反向代理到后端 8008，放宽上传 500MB 与 300s 超时
+├── smart-quotation.service    ← systemd 服务文件：后端开机自启、崩溃自愈、单 worker 运行
+└── update.sh                  ← 服务器更新脚本：修复权限 → 重新构建前端 → 重启后端
+
+docs/                          ← 设计文档
+├── tech-architecture.md       ← 技术架构设计（分层、路由、查询引擎流程图等）
+├── data-model-and-api.md      ← 数据模型与 API 设计
+├── requirements-analysis.md   ← 需求分析
+├── implementation-plan.md     ← 实施计划
+└── auth-system/               ← 认证系统专项文档（README + 需求/设计/实现）
+```
+
+### 五、快速定位表（维护时常用）
+
+| 想解决的问题 | 先看哪个文件 |
+| ----------- | ----------- |
+| 端口 / 环境变量 / 数据库路径 / 上传限制 | backend/app/config.py |
+| 数据库有哪些表、什么字段 | backend/app/models.py |
+| 登录、邀请码、权限是怎么做的 | backend/app/routers/auth.py、invites.py + backend/app/utils/auth_utils.py |
+| 智能查询的规则怎么解析 | backend/app/services/query_engine.py、message_parser.py、ai_query_service.py |
+| 组合方案算法在哪儿 | backend/app/services/combination_engine.py |
+| Excel 导入 / 导出逻辑 | backend/app/services/import_service.py、product_service.py、utils/excel_utils.py |
+| 页面路由与各页面组件 | frontend/src/App.tsx + frontend/src/pages/ |
+| 前端如何调用后端接口 | frontend/src/services/api.ts |
+| 登录态 / 主题如何持久化 | frontend/src/store/AuthContext.tsx、ThemeContext.tsx |
+| 云服务器如何部署 / 更新 | deploy/deploy.sh、deploy/update.sh |
+
+---
+
+> 版本 2.6.0 | 基于 FastAPI + React 构建 | AI 使用 DeepSeek API | API Key 加密存储 | 游客体验模式 + 无账号公司自动清理 | 浅色/深色主题 | 智能方案支持任意/不限品类 | 附完整前后端代码目录说明
