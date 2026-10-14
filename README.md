@@ -3,7 +3,6 @@
 # 智能报价系统 · Smart Quotation System
 
 **商品管理 · 智能查询 · 组合报价方案** — 可自托管的报价工具
-**Catalog management, natural-language search and bundle quotation — self-hosted.**
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
 ![Node](https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white)
@@ -11,7 +10,9 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688?logo=fastapi&logoColor=white)
 ![Database](https://img.shields.io/badge/Database-SQLite-003B57?logo=sqlite&logoColor=white)
 
-许可证：(待补充：LICENSE)　·　版本：1.0.0　·　[English](#english)
+**中文**　·　[English](README.en.md)
+
+许可证：(待补充：LICENSE)　·　版本：1.0.0
 
 </div>
 
@@ -35,7 +36,8 @@
 - [贡献](#-贡献)
 - [许可证](#-许可证)
 - [联系方式](#-联系方式)
-- [English](#english)
+
+> English documentation: [README.en.md](README.en.md)
 
 ---
 
@@ -266,6 +268,8 @@ npm run build
 智能报价/
 ├── 启动.bat                     # Windows 一键启动入口（转调 launcher.ps1）
 ├── launcher.ps1                 # 启动脚本：检测环境、创建/修复 .venv、装依赖、启动前后端、打开浏览器
+├── README.md                    # 中文说明（本文件）
+├── README.en.md                 # English documentation
 ├── backend/
 │   ├── requirements.txt         # Python 依赖清单
 │   └── app/
@@ -387,7 +391,7 @@ tar -czf data-backup-$(date +%Y%m%d).tar.gz data
 
 (待补充：`CONTRIBUTING.md` 贡献指南 —— 开发环境要求、代码风格、提交信息规范、分支与 PR 流程、测试与检查命令。)
 
-提交前请确认：不包含任何真实密钥或个人数据；改动与现有代码风格一致；必要时同步更新本文档。
+提交前请确认：不包含任何真实密钥或个人数据；改动与现有代码风格一致；必要时同步更新本文档（中英文两份）。
 
 ---
 
@@ -405,78 +409,8 @@ tar -czf data-backup-$(date +%Y%m%d).tar.gz data
 
 ---
 
-## English
-
-### Overview
-
-Smart Quotation System is a **self-hosted** catalog and quotation tool. It consolidates product data that usually lives in scattered spreadsheets, provides fast lookups via structured filters or natural language, and automatically builds multiple feasible quotation bundles under constraints such as total price, category mix, and per-item price/discount limits.
-
-The system has two parts communicating over HTTP/JSON: a **React + TypeScript** single-page frontend (`frontend/`) and a **FastAPI + SQLite** backend (`backend/`). All data lives in a single local SQLite file — no external database or cloud service is required. AI features are optional and use your own DeepSeek API key.
-
-The repository ships **no sample or real business data**; import your own.
-
-### Features
-
-- Product catalog CRUD, batch delete, pagination, header filters, custom column display
-- Multi-file Excel/CSV import (`.xlsx` / `.xls` / `.csv`) with automatic column matching, manual mapping, and duplicate strategies (skip / overwrite / error) plus per-row results
-- Excel export for catalog, query results and quotation bundles, with images embedded in cells
-- Rule-based smart search (barcode, model, brand, category, price ranges, discount, sorting) and batch model lookup
-- Optional AI search that converts natural language into query intents (token usage shown per call)
-- Bundle engine: enumerates feasible combinations under total-price, total-discount, per-category quantity and limit constraints; supports "any category" slots
-- Diagnostics panel with actionable suggestions when no bundle can be generated, including one-click apply
-- Saved/historical bundles, bundle export, and recommended items from parent organizations in the invite chain
-- Multi-tenant isolation by organization, three roles (super admin / admin / user) plus a 24-hour guest mode, one-time invite codes
-- Light/dark themes, background cleanup of expired uploads and empty organizations
-
-### Requirements
-
-- Python 3.9+
-- Node.js 18+ (LTS)
-- Windows PowerShell 5.1+ only if you use the one-click `启动.bat` launcher (Windows)
-
-### Quick start
-
-One-click (Windows): double-click `启动.bat`. The script checks Python/Node, creates or repairs `.venv`, installs backend and frontend dependencies, starts the backend on port 8000, waits for its health check, starts the Vite dev server on port 5173 and opens the browser.
-
-Manual:
-
-```bash
-# backend
-cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# frontend (separate terminal)
-cd frontend
-npm install
-npm run dev        # http://localhost:5173
-```
-
-Production build: `cd frontend && npm run build` — the backend serves `frontend/dist` automatically when present, so a single port is enough.
-
-Then sign in and create an invite code from the "User Management" page to register further accounts.
-
-> Before deploying, **change the initial super-admin credentials and organization** defined by the `SUPER_ADMIN_*` constants in `backend/app/config.py`, and set a random `JWT_SECRET_KEY`.
-
-### Configuration
-
-Configuration lives in `backend/app/config.py` and can be overridden by environment variables: `DATABASE_URL`, `SYNC_DATABASE_URL`, `HOST`, `PORT`, `CORS_ORIGINS`, `JWT_SECRET_KEY`, `ADMIN_API_KEY`, `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`. See the Chinese section above for defaults and notes.
-
-### Project layout
-
-`backend/app/` (entry point, config, models, schemas, `routers/`, `services/`, `utils/`), `frontend/src/` (`pages/`, `components/`, `services/`, `store/`, `types/`), `deploy/` (Nginx + systemd examples), `data/` (runtime SQLite database and caches, git-ignored).
-
-### Security
-
-No secrets are bundled. AI keys are user-supplied and stored encrypted. Always set a random `JWT_SECRET_KEY` in production — it also derives the encryption key for sensitive fields — and replace the default initial administrator values. Never commit `.env` files, keys or the `data/` directory; a secret scanner (e.g. gitleaks) is recommended.
-
-### License & contact
-
-License: (待补充：LICENSE — to be added before public release). Questions and feature requests: please open a GitHub Issue in this repository.
-
----
-
 <div align="center">
 
-为商品管理与报价流程而做的自托管工具 · A self-hosted tool for catalog management and quotation workflows.
+为商品管理与报价流程而做的自托管工具 · [English](README.en.md)
 
 </div>
