@@ -36,15 +36,32 @@ DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/ch
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # JWT 配置（用户认证）
-# 开发默认值仅用于开箱即用；生产环境必须通过环境变量 JWT_SECRET_KEY 覆盖（该密钥同时用于敏感信息加密）
-JWT_SECRET_KEY_DEFAULT = "***REMOVED-SECRET***"
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY_DEFAULT)
+# 密钥不写入源码：优先读取环境变量 JWT_SECRET_KEY；未设置时读取/生成 data/.jwt_secret_key
+# （data/ 已被 .gitignore 忽略）。该密钥同时用于用户名、API Key 等敏感信息的加密，
+# 生产环境请显式设置并妥善保管。
+_JWT_SECRET_FILE = DATA_DIR / ".jwt_secret_key"
+
+
+def _load_jwt_secret() -> str:
+    env_secret = os.getenv("JWT_SECRET_KEY", "").strip()
+    if env_secret:
+        return env_secret
+    if _JWT_SECRET_FILE.exists():
+        value = _JWT_SECRET_FILE.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    value = os.urandom(48).hex()
+    _JWT_SECRET_FILE.write_text(value, encoding="utf-8")
+    return value
+
+
+JWT_SECRET_KEY = _load_jwt_secret()
 JWT_ALGORITHM = "HS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
 
-# 超级管理员预设账号（永久固定：每次重建数据库时以此创建，不可更改）
-SUPER_ADMIN_USERNAME = "admin"
-SUPER_ADMIN_PASSWORD = "***REMOVED-PASSWORD***"
-SUPER_ADMIN_EMAIL = "***REMOVED-EMAIL***"
-SUPER_ADMIN_COMPANY = "***REMOVED-COMPANY***"
-SUPER_ADMIN_COMPANY_PASSWORD = "***REMOVED-PASSWORD***"  # 最高级管理员公司对应的公司数据库密码
+# 超级管理员预设账号（首次建库时用于创建；仓库不含任何默认口令，可用环境变量覆盖）
+SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "admin")
+SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "")
+SUPER_ADMIN_EMAIL = os.getenv("SUPER_ADMIN_EMAIL", "")
+SUPER_ADMIN_COMPANY = os.getenv("SUPER_ADMIN_COMPANY", "默认公司")
+SUPER_ADMIN_COMPANY_PASSWORD = os.getenv("SUPER_ADMIN_COMPANY_PASSWORD", "")

@@ -1,5 +1,6 @@
 """数据库连接与初始化"""
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -41,11 +42,14 @@ async def get_db() -> AsyncSession:
 
 
 async def seed_super_admin(db_session):
-    """初始化超级管理员账号与公司（预设信息固定于 config，每次重建不可变）"""
+    """初始化超级管理员账号与公司（预设信息来自 config，可用环境变量 SUPER_ADMIN_* 覆盖）"""
     from app.models import User, Company
     from app.utils.auth_utils import hash_password
     from app.utils.crypto_utils import encrypt_username, hash_username
     admin_username_hash = hash_username(SUPER_ADMIN_USERNAME)
+    # 仓库不含默认口令：未通过环境变量提供时，自动生成随机口令并仅打印一次
+    company_password = SUPER_ADMIN_COMPANY_PASSWORD or os.urandom(9).hex()
+    admin_password = SUPER_ADMIN_PASSWORD or os.urandom(9).hex()
 
     # 1. 确保超级管理员公司存在（公司数据库密码固定于 config）
     company = (await db_session.execute(
@@ -54,12 +58,16 @@ async def seed_super_admin(db_session):
     if not company:
         company = Company(
             company_name=SUPER_ADMIN_COMPANY,
-            password_hash=hash_password(SUPER_ADMIN_COMPANY_PASSWORD),
+            password_hash=hash_password(company_password),
             created_by=0,
         )
         db_session.add(company)
         await db_session.flush()
         logger.info(f"超级管理员公司初始化完成: {SUPER_ADMIN_COMPANY}")
+        if not SUPER_ADMIN_COMPANY_PASSWORD:
+            logger.warning(
+                f"未设置 SUPER_ADMIN_COMPANY_PASSWORD，已为「{SUPER_ADMIN_COMPANY}」生成随机公司数据库密码（仅本次打印）：{company_password}"
+            )
 
     # 2. 确保超级管理员账号存在
     result = await db_session.execute(select(User).where(User.username_hash == admin_username_hash))
@@ -77,7 +85,7 @@ async def seed_super_admin(db_session):
     admin = User(
         username=encrypt_username(SUPER_ADMIN_USERNAME),
         username_hash=admin_username_hash,
-        password_hash=hash_password(SUPER_ADMIN_PASSWORD),
+        password_hash=hash_password(admin_password),
         email=SUPER_ADMIN_EMAIL,
         role="super_admin",
         company_name=SUPER_ADMIN_COMPANY,
@@ -90,6 +98,11 @@ async def seed_super_admin(db_session):
     logger.info(
         f"超级管理员初始化完成: {SUPER_ADMIN_USERNAME} / {SUPER_ADMIN_COMPANY}"
     )
+    if not SUPER_ADMIN_PASSWORD:
+        logger.warning(
+            f"未设置 SUPER_ADMIN_PASSWORD，已为超级管理员「{SUPER_ADMIN_USERNAME}」生成随机口令"
+            f"（仅本次打印，请登录后立即修改）：{admin_password}"
+        )
     return admin
 
 

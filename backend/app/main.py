@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from app.config import CORS_ORIGINS, HOST, PORT, JWT_SECRET_KEY, JWT_SECRET_KEY_DEFAULT
+from app.config import CORS_ORIGINS, HOST, PORT, JWT_SECRET_KEY
 from app.database import init_db, sync_engine
 from app.routers import products, import_data, query, solutions, auth, invites, column_display, company
 from app.services.cleanup_service import clean_all, FILE_MAX_AGE_HOURS, CLEANUP_INTERVAL_HOURS
@@ -57,9 +57,9 @@ async def periodic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库并开始定时清理"""
-    # 安全提醒：若未通过环境变量覆盖 JWT_SECRET_KEY（其同时用于敏感信息加密），给出醒目提示
-    if JWT_SECRET_KEY == JWT_SECRET_KEY_DEFAULT:
-        logger.warning("当前使用默认 JWT_SECRET_KEY，生产环境请务必通过环境变量 JWT_SECRET_KEY 设置随机密钥（该密钥同时用于用户名/API Key 等敏感信息加密）")
+    # 安全提醒：若未通过环境变量提供 JWT_SECRET_KEY（其同时用于敏感信息加密），给出醒目提示
+    if not os.getenv("JWT_SECRET_KEY"):
+        logger.warning("未配置 JWT_SECRET_KEY，请通过环境变量提供随机密钥（该密钥同时用于用户名/API Key 等敏感信息加密）")
     await init_db()
     # 启动时自动清理（过期游客、无账号公司；seed 已确保超级管理员公司绑定，不会被误删）
     auto_cleanup()
@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="智能报价系统 API",
-    description="基于公司内部商品数据库的智能报价查询系统",
+    description="基于商品数据库的智能报价查询系统",
     version="1.0.0",
     lifespan=lifespan,
 )
